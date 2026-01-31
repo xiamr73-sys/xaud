@@ -1,7 +1,11 @@
+# 基础框架
 flask
-ccxt
-pandas
-numpy
-python-dotenv
 gunicorn
-git+https://github.com/twopirllc/pandas-ta.git@development
+python-dotenv
+
+# 加密货币与数据分析
+pandas
+pandas-ta
+ccxt
+numpy
+requests
