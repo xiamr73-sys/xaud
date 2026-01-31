@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>加密货币趋势监控</title>
+    <style>
+        :root {
+            --bg-color: #121212;
+            --card-bg: #1e1e1e;
+            --text-primary: #e0e0e0;
+            --text-secondary: #a0a0a0;
+            --accent-green: #00e676;
+            --accent-red: #ff1744;
+            --accent-yellow: #ffea00;
+            --border-radius: 12px;
+            --shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            margin: 0;
+            padding: 20px;
+            line-height: 1.5;
+        }
+        
+        h1 {
+            text-align: center;
+            font-weight: 800;
+            margin: 30px 0 10px;
+            background: linear-gradient(45deg, #2196f3, #00e676);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-size: 2.5rem;
+        }
+        
+        .status-bar {
+            text-align: center;
+            margin-bottom: 40px;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            background: rgba(255,255,255,0.05);
+            padding: 8px 16px;
+            border-radius: 50px;
+            display: inline-block;
+            position: relative;
+            left: 50%;
+            transform: translateX(-50%);
+            backdrop-filter: blur(5px);
+        }
+        
+        .refresh-btn {
+            background-color: var(--card-bg);
+            color: var(--accent-green);
+            border: 1px solid var(--accent-green);
+            padding: 6px 12px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            margin-left: 15px;
+            transition: all 0.2s;
+        }
+        
+        .refresh-btn:hover {
+            background-color: var(--accent-green);
+            color: #000;
+        }
+        
+        .refresh-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 30px;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+        
+        .column {
+            background-color: var(--card-bg);
+            border-radius: var(--border-radius);
+            padding: 20px;
+            box-shadow: var(--shadow);
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+        
+        .col-header {
+            font-size: 1.4rem;
+            font-weight: 700;
+            margin-bottom: 25px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .long-header { color: var(--accent-green); }
+        .short-header { color: var(--accent-red); }
+        
+        .card {
+            background: linear-gradient(145deg, #252525, #1f1f1f);
+            border-radius: 10px;
+            padding: 16px;
+            margin-bottom: 16px;
+            transition: transform 0.2s, box-shadow 0.2s;
+            border: 1px solid rgba(255,255,255,0.03);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 15px rgba(0,0,0,0.3);
+            border-color: rgba(255,255,255,0.1);
+        }
+        
+        /* Grid Layout for Card Content */
+        .card-content {
+            display: grid;
+            grid-template-columns: 1.5fr 1.2fr 1fr;
+            gap: 15px;
+            align-items: center;
+        }
+
+        .symbol-row {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+        }
+        
+        .symbol {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #fff;
+        }
+        
+        .price {
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+        
+        .score-box {
+            background: rgba(255, 235, 59, 0.1);
+            color: var(--accent-yellow);
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-weight: 700;
+            font-size: 0.9rem;
+            text-align: center;
+            border: 1px solid rgba(255, 235, 59, 0.2);
+        }
+        
+        .metrics {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            font-size: 0.85rem;
+        }
+        
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+        }
+        
+        .label { color: #666; }
+        
+        .oi-up { color: var(--accent-green); }
+        .oi-down { color: var(--accent-red); }
+        .fr-pos { color: #ff9800; }
+        .fr-neg { color: var(--accent-green); }
+        
+        .tags-container {
+            margin-top: 12px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(255,255,255,0.05);
+        }
+        
+        .tag {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+        
+        .tag-poc { background: rgba(156, 39, 176, 0.2); color: #e1bee7; border: 1px solid rgba(156, 39, 176, 0.3); }
+        .tag-bull-div { background: rgba(76, 175, 80, 0.2); color: #a5d6a7; border: 1px solid rgba(76, 175, 80, 0.3); }
+        .tag-greed { background: rgba(244, 67, 54, 0.2); color: #ef9a9a; border: 1px solid rgba(244, 67, 54, 0.3); }
+        .tag-true-brk { background: rgba(33, 150, 243, 0.2); color: #90caf9; border: 1px solid rgba(33, 150, 243, 0.3); }
+        .tag-fake-brk { background: rgba(255, 152, 0, 0.2); color: #ffcc80; border: 1px solid rgba(255, 152, 0, 0.3); }
+        .tag-mtf { background: rgba(255, 193, 7, 0.2); color: #ffe082; border: 1px solid rgba(255, 193, 7, 0.3); }
+        .tag-order-flow { background: rgba(233, 30, 99, 0.2); color: #f48fb1; border: 1px solid rgba(233, 30, 99, 0.3); }
+        .tag-inst { background: rgba(96, 125, 139, 0.2); color: #b0bec5; border: 1px solid rgba(96, 125, 139, 0.3); }
+        .tag-alert { background: rgba(255, 61, 0, 0.2); color: #ff9e80; border: 1px solid rgba(255, 61, 0, 0.3); animation: pulse 2s infinite; }
+
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(255, 61, 0, 0.4); }
+            70% { box-shadow: 0 0 0 6px rgba(255, 61, 0, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 61, 0, 0); }
+        }
+
+        .trade-plan {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px dashed rgba(255, 255, 255, 0.1);
+            display: none; /* Hidden by default */
+            animation: fadeIn 0.3s ease-in;
+        }
+        
+        .trade-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+        }
+        
+        .tp-label { color: var(--accent-green); font-weight: bold; }
+        .sl-label { color: var(--accent-red); font-weight: bold; }
+        .price-val { font-family: 'JetBrains Mono', monospace; color: #fff; }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .loading {
+            padding: 40px;
+            text-align: center;
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+        
+        @media (max-width: 768px) {
+            .container { grid-template-columns: 1fr; }
+            h1 { font-size: 1.8rem; }
+            .card-content { grid-template-columns: 1fr auto; }
+            .score-box { grid-row: 1; grid-column: 2; width: fit-content; }
+            .metrics { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        }
+    </style>
+</head>
+<body>
+    <h1>🚀 牙牙初号机</h1>
+    
+    <div class="status-bar">
+        最后更新: <span id="last-updated">--:--:--</span> 
+        <span id="time-ago" style="margin-left: 10px; color: var(--accent-yellow);"></span>
+        <span id="update-status"></span>
+        <button id="refresh-btn" class="refresh-btn" onclick="triggerRefresh()">🔄 立即刷新</button>
+        <a href="/alerts" class="refresh-btn" style="text-decoration: none; border-color: #ff3d00; color: #ff3d00;">⚠️ 查看爆发警报</a>
+    </div>
+
+    <div class="container">
+        <!-- Trend Score Section -->
+        <div class="column">
+            <div class="col-header long-header">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
+                强多头 Top 3 (TrendScore)
+            </div>
+            <div id="longs-list">
+                <div class="loading">正在分析市场数据...</div>
+            </div>
+        </div>
+        
+        <div class="column">
+            <div class="col-header short-header">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><polyline points="19 12 12 19 5 12"></polyline></svg>
+                强空头 Top 3 (TrendScore)
+            </div>
+            <div id="shorts-list">
+                <div class="loading">正在分析市场数据...</div>
+            </div>
+        </div>
+
+        <!-- ADX Section -->
+        <div class="column">
+            <div class="col-header long-header" style="color: #00bcd4;">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
+                强多头 Top 3 (High ADX)
+            </div>
+            <div id="adx-longs-list">
+                <div class="loading">等待数据...</div>
+            </div>
+        </div>
+        
+        <div class="column">
+            <div class="col-header short-header" style="color: #ff9800;">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"></polyline><polyline points="17 18 23 18 23 12"></polyline></svg>
+                强空头 Top 3 (High ADX)
+            </div>
+            <div id="adx-shorts-list">
+                <div class="loading">等待数据...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function formatNumber(num, decimals=2) {
+            return parseFloat(num).toFixed(decimals);
+        }
+
+        let expandedCards = new Set();
+
+        function createCard(item) {
+            const oiClass = item.open_interest_change > 0 ? 'oi-up' : 'oi-down';
+            const frClass = item.funding_rate > 0 ? 'fr-pos' : 'fr-neg';
+            
+            // Serialize item for onclick
+            const itemStr = encodeURIComponent(JSON.stringify(item));
+            const isExpanded = expandedCards.has(item.symbol);
+
+            let tagsHtml = '';
+            if (item.mtf_confirmed) tagsHtml += `<span class="tag tag-mtf">⚡ 1H共振</span>`;
+            if (item.poc_signal) tagsHtml += `<span class="tag tag-poc">POC突破</span>`;
+            if (item.order_flow_signal) tagsHtml += `<span class="tag tag-order-flow">🐳 大单流入</span>`;
+            if (item.oi_signal === 'TRUE_BREAKOUT') tagsHtml += `<span class="tag tag-true-brk">真突破</span>`;
+            if (item.oi_signal === 'FAKE_BREAKOUT') tagsHtml += `<span class="tag tag-fake-brk">假突破</span>`;
+            if (item.funding_signal === 'BULLISH_DIVERGENCE') tagsHtml += `<span class="tag tag-bull-div">费率背离</span>`;
+            if (item.funding_signal === 'EXTREME_GREED') tagsHtml += `<span class="tag tag-greed">极度贪婪</span>`;
+            if (item.institutional_entry && !item.oi_signal) tagsHtml += `<span class="tag tag-inst">机构异动</span>`;
+            
+            // Pre-breakout reasons
+            if (item.pre_breakout_reasons && item.pre_breakout_reasons.length > 0) {
+                item.pre_breakout_reasons.forEach(reason => {
+                    tagsHtml += `<span class="tag tag-alert">${reason}</span>`;
+                });
+            }
+
+            // Calculate initial R:R for display if expanded
+            // ... (rest of card content) ...
+            
+            // We need to inject the expanded state into the trade-plan style
+            const displayStyle = isExpanded ? 'block' : 'none';
+            
+            // If expanded, we might want to show the correct recalculated values.
+            // But createCard is called on data update.
+            // If we just show static data from backend, it's fine.
+            // If we want "Entry at Click Time", that's tricky because "Click Time" is in the past.
+            // If the user keeps it open, maybe they want to see live updates?
+            // Or maybe they want to see the plan they "locked in"?
+            // For simplicity: If auto-refresh happens, we update the card with NEW data.
+            // This means "Entry" updates to current price.
+            // If the user wants to "lock", they should probably screenshot or we need complex state.
+            // Let's assume auto-update is fine.
+            
+            const n_atr = 2.0;
+            const m_atr = 4.0;
+            let tp = 0, sl = 0;
+            if (item.trend === 'STRONG_LONG') {
+                sl = item.close - (n_atr * item.atr);
+                tp = item.close + (m_atr * item.atr);
+            } else {
+                sl = item.close + (n_atr * item.atr);
+                tp = item.close - (m_atr * item.atr);
+            }
+            const risk = Math.abs(item.close - sl);
+            const reward = Math.abs(tp - item.close);
+            const rr = risk > 0 ? (reward / risk).toFixed(1) : '0.0';
+
+            return `
+                <div class="card" onclick="toggleTradePlan(this, '${itemStr}')" data-symbol="${item.symbol}">
+                    <div class="card-content">
+                        <div>
+                            <div class="symbol-row">
+                                <span class="symbol">${item.symbol}</span>
+                            </div>
+                            <div class="price">$${formatNumber(item.close, 4)}</div>
+                        </div>
+                        
+                        <div class="score-box" title="Trend Score">
+                            ★ ${formatNumber(item.trend_score, 1)}
+                        </div>
+                        
+                        <div class="metrics">
+                            <div class="metric-row">
+                                <span class="label">OI:</span>
+                                <span class="${oiClass}">${item.open_interest_change > 0 ? '+' : ''}${formatNumber(item.open_interest_change)}%</span>
+                            </div>
+                            <div class="metric-row">
+                                <span class="label">FR:</span>
+                                <span class="${frClass}">${formatNumber(item.funding_rate * 100, 4)}%</span>
+                            </div>
+                            <div class="metric-row">
+                                <span class="label">ADX:</span>
+                                <span style="color: #e0e0e0">${formatNumber(item.adx)}</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    ${tagsHtml ? `<div class="tags-container">${tagsHtml}</div>` : ''}
+                    
+                    <div class="trade-plan" style="display: ${displayStyle};">
+                        <div class="trade-row">
+                            <span class="label">🚀 入场 (Entry):</span>
+                            <span class="price-val entry-val">$${formatNumber(item.close, 4)}</span>
+                        </div>
+                        <div class="trade-row">
+                            <span class="tp-label">🎯 止盈 (TP):</span>
+                            <span class="price-val tp-val">$${formatNumber(tp, 4)}</span>
+                        </div>
+                        <div class="trade-row">
+                            <span class="sl-label">🛡️ 止损 (SL):</span>
+                            <span class="price-val sl-val">$${formatNumber(sl, 4)}</span>
+                        </div>
+                        <div class="trade-row" style="color: #888; font-size: 0.8em; margin-top: 5px;">
+                            <span>ATR: ${formatNumber(item.atr, 5)}</span>
+                            <span>R:R Ratio: <span class="rr-val">1:${rr}</span></span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function toggleTradePlan(card, itemStr) {
+            // itemStr is URI encoded JSON string
+            const item = JSON.parse(decodeURIComponent(itemStr));
+            let plan = card.querySelector('.trade-plan');
+            const symbol = card.getAttribute('data-symbol');
+            
+            if (plan.style.display === 'block') {
+                plan.style.display = 'none';
+                expandedCards.delete(symbol);
+            } else {
+                plan.style.display = 'block';
+                expandedCards.add(symbol);
+                
+                // Recalculate based on current data (Entry at Click)
+                // Note: If data refreshes, this visual calculation is overwritten by createCard
+                // But since we persist expandedCards set, createCard will render it open with latest price.
+                // This feels consistent.
+            }
+        }
+
+        let lastUpdatedTs = 0;
+
+        function updateTimeAgo() {
+            if (!lastUpdatedTs) return;
+            const now = Math.floor(Date.now() / 1000);
+            const diff = now - lastUpdatedTs;
+            let timeText = diff < 60 ? `(刚刚更新)` : `(数据更新于 ${Math.floor(diff / 60)} 分钟前)`;
+            document.getElementById('time-ago').textContent = timeText;
+        }
+
+        async function triggerRefresh() {
+            const btn = document.getElementById('refresh-btn');
+            btn.disabled = true;
+            btn.textContent = '请求中...';
+            
+            try {
+                const response = await fetch('/api/refresh', { method: 'POST' });
+                const data = await response.json();
+                if (data.status === 'started') {
+                    btn.textContent = '刷新已开始';
+                    updateData(); // Immediate check
+                } else {
+                    btn.textContent = '正在刷新中';
+                }
+            } catch (e) {
+                console.error(e);
+                btn.textContent = '请求失败';
+                btn.disabled = false;
+            }
+        }
+
+        async function updateData() {
+            try {
+                const response = await fetch('/api/data');
+                const data = await response.json();
+                
+                document.getElementById('last-updated').textContent = data.last_updated || '等待首次更新...';
+                
+                const btn = document.getElementById('refresh-btn');
+                if (data.is_updating) {
+                    document.getElementById('update-status').textContent = ' 🔄 (更新中...)';
+                    btn.disabled = true;
+                    btn.textContent = '更新中...';
+                } else {
+                    document.getElementById('update-status').textContent = '';
+                    btn.disabled = false;
+                    btn.textContent = '🔄 立即刷新';
+                }
+                
+                if (data.last_updated_ts) {
+                    lastUpdatedTs = data.last_updated_ts;
+                    updateTimeAgo();
+                }
+                
+                const longsContainer = document.getElementById('longs-list');
+                // Only update DOM if not updating (or partial update? no, just update)
+                // We persist expanded cards so it's safe to overwrite innerHTML
+                longsContainer.innerHTML = data.longs.length ? data.longs.map(createCard).join('') : '<div class="loading">暂无符合条件的高分币种</div>';
+                
+                const shortsContainer = document.getElementById('shorts-list');
+                shortsContainer.innerHTML = data.shorts.length ? data.shorts.map(createCard).join('') : '<div class="loading">暂无符合条件的高分币种</div>';
+
+                // ADX Lists
+                const adxLongsContainer = document.getElementById('adx-longs-list');
+                adxLongsContainer.innerHTML = (data.adx_longs && data.adx_longs.length) ? data.adx_longs.map(createCard).join('') : '<div class="loading">暂无符合条件的高ADX币种</div>';
+                
+                const adxShortsContainer = document.getElementById('adx-shorts-list');
+                adxShortsContainer.innerHTML = (data.adx_shorts && data.adx_shorts.length) ? data.adx_shorts.map(createCard).join('') : '<div class="loading">暂无符合条件的高ADX币种</div>';
+                
+            } catch (error) {
+                console.error('Fetch error:', error);
+            }
+        }
+
+        updateData();
+        // Poll every 5 seconds to check status, but data updates every 5 mins on server
+        setInterval(updateData, 5000);
+        setInterval(updateTimeAgo, 1000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+    "GUI": {
+        "CSS_NAME": "pyleecan.css",
+        "CSS_PATH": "",
+        "UNIT_M": 1,
+        "UNIT_M2": 1
+    },
+    "MAIN": {
+        "MACHINE_DIR": "",
+        "MATLIB_DIR": ""
+    },
+    "PLOT": {
+        "COLOR_DICT": {},
+        "COLOR_DICT_NAME": "pyleecan_color.json",
+        "FONT_NAME": "Arial"
+    }
+}

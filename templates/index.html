@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>电机参数仿真</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="container">
+    <h1>全自动优化设计</h1>
+    <form id="auto-design-form">
+      <div class="grid">
+        <label>转子类型
+          <select name="rotor_type">
+            <option value="IN">内转子</option>
+            <option value="OUT">外转子</option>
+          </select>
+        </label>
+        <label>定子内径 mm
+          <input name="d_stator_in_mm" type="number" step="0.1" value="60">
+        </label>
+        <label>定子外径 mm
+          <input name="d_stator_out_mm" type="number" step="0.1" value="120">
+        </label>
+        <label>转子内径 mm
+          <input name="d_rotor_in_mm" type="number" step="0.1" value="20">
+        </label>
+        <label>转子外径 mm
+          <input name="d_rotor_out_mm" type="number" step="0.1" value="58">
+        </label>
+        <label>额定电压 V
+          <input name="voltage_v" type="number" step="0.1" value="24">
+        </label>
+        <label>最大电流 A
+          <input name="max_current_a" type="number" step="0.1" value="30">
+        </label>
+        <label>扭矩要求 N·m
+          <input name="torque_req_Nm" type="number" step="0.1" value="5">
+        </label>
+        <label>设计转速 rpm
+          <input name="design_speed_rpm" type="number" step="1" value="3000">
+        </label>
+        <label>遗传算法迭代次数
+          <input name="generations" type="number" step="1" value="15">
+        </label>
+        <label>齿槽转矩要求 N·m (Max)
+          <input name="cogging_req_Nm" type="number" step="0.01" value="0.05">
+        </label>
+        <label>叠厚 mm
+          <input name="stack_length_mm" type="number" step="1" value="40">
+        </label>
+      </div>
+      <button type="submit">开始全自动设计与绘图</button>
+    </form>
+    
+    <div id="progress-container" style="margin-top: 15px; display: none;">
+      <div style="font-size: 14px; color: #9ca3af; margin-bottom: 5px;">优化进度: <span id="progress-text">0 / 0</span></div>
+      <div style="width: 100%; background-color: #1f2937; border-radius: 6px; overflow: hidden;">
+        <div id="progress-bar" style="width: 0%; height: 8px; background-color: #0ea5e9; transition: width 0.3s ease;"></div>
+      </div>
+    </div>
+    
+    <div id="auto-result" class="result hidden">
+      <h3>AI 设计评估</h3>
+      <div class="cards ai-card">
+        <div class="card ai-verdict-card" style="flex: 2; border:none; background: transparent; box-shadow:none;">
+            <div class="k">综合评价</div>
+            <div class="v ai-verdict" id="ai_verdict">—</div>
+        </div>
+        <div class="card ai-score-card" style="flex: 1; border:none; background: transparent; box-shadow:none;">
+            <div class="k">评分</div>
+            <div class="v" id="ai_score">—</div>
+        </div>
+      </div>
+      <div id="ai_details" class="ai-details"></div>
+
+      <h3>优化结果参数</h3>
+      <div class="cards">
+        <div class="card"><div class="k">极槽配合</div><div class="v" id="auto_slots_poles">—</div></div>
+        <div class="card"><div class="k">每槽匝数</div><div class="v" id="auto_turns">—</div></div>
+        <div class="card"><div class="k">磁钢厚度</div><div class="v" id="auto_mag_th">—</div></div>
+        <div class="card"><div class="k">相电阻 R</div><div class="v" id="auto_R">—</div></div>
+        <div class="card"><div class="k">Kt / Ke</div><div class="v" id="auto_KtKe">—</div></div>
+        <div class="card"><div class="k">额定效率</div><div class="v" id="auto_eff">—</div></div>
+        <div class="card"><div class="k">齿槽转矩 (est)</div><div class="v" id="auto_tcog">—</div></div>
+        <div class="card"><div class="k">定子轭厚</div><div class="v" id="auto_sy">—</div></div>
+        <div class="card"><div class="k">转子轭厚</div><div class="v" id="auto_ry">—</div></div>
+      </div>
+      
+      <h3>设计图纸与特性曲线</h3>
+      <div class="grid-2">
+        <div class="plot-card">
+            <h4>机械结构示意图</h4>
+            <img id="auto_mech_draw" onclick="openLightbox(this)">
+        </div>
+        <div class="plot-card">
+            <h4>磁密云图 (估算)</h4>
+            <img id="auto_flux_map" onclick="openLightbox(this)">
+        </div>
+        <div class="plot-card">
+            <h4>效率 MAP</h4>
+            <img id="auto_eff_map" onclick="openLightbox(this)">
+        </div>
+        <div class="plot-card">
+            <h4>扭矩-转速特性</h4>
+            <img id="auto_torque_curve" onclick="openLightbox(this)">
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div id="lightbox" onclick="closeLightbox()">
+    <img id="lightbox-img">
+  </div>
+
+  <script>
+    function openLightbox(img) {
+        if (!img.src) return;
+        const lightbox = document.getElementById('lightbox');
+        const lightboxImg = document.getElementById('lightbox-img');
+        lightboxImg.src = img.src;
+        lightbox.classList.add('active');
+    }
+    
+    function closeLightbox() {
+        document.getElementById('lightbox').classList.remove('active');
+    }
+
+    const autoForm = document.getElementById('auto-design-form');
+    const autoResult = document.getElementById('auto-result');
+    const progressContainer = document.getElementById('progress-container');
+    const progressBar = document.getElementById('progress-bar');
+    const progressText = document.getElementById('progress-text');
+
+    autoForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = autoForm.querySelector('button');
+        const oldText = btn.textContent;
+        btn.textContent = '优化计算中，请稍候...';
+        btn.disabled = true;
+        autoResult.classList.add('hidden');
+        progressContainer.style.display = 'block';
+        progressBar.style.width = '0%';
+        progressText.textContent = '初始化中...';
+        
+        // Start Progress Stream
+        const evtSource = new EventSource("/stream_progress");
+        evtSource.onmessage = function(event) {
+            const d = JSON.parse(event.data);
+            if (d.total > 0) {
+                const pct = (d.current / d.total) * 100;
+                progressBar.style.width = pct + '%';
+                progressText.textContent = `第 ${d.current} 代 / 共 ${d.total} 代`;
+            }
+            if (d.status === "completed") {
+                evtSource.close();
+            }
+        };
+        
+        try {
+            const fd = new FormData(autoForm);
+            const r = await fetch('/auto_design', { method: 'POST', body: fd });
+            const data = await r.json();
+            
+            // Force close if not already
+            evtSource.close();
+            progressBar.style.width = '100%';
+            setTimeout(() => { progressContainer.style.display = 'none'; }, 500);
+            
+            const p = data.optimized_params;
+            document.getElementById('auto_slots_poles').textContent = p.slots + '槽 / ' + p.poles + '极';
+            document.getElementById('auto_turns').textContent = p.turns_per_slot;
+            document.getElementById('auto_mag_th').textContent = p.magnet_thickness_mm.toFixed(2) + ' mm';
+            document.getElementById('auto_R').textContent = p.R_ohm.toFixed(4) + ' Ω';
+            document.getElementById('auto_KtKe').textContent = p.Kt.toFixed(3) + ' / ' + p.Ke.toFixed(3);
+            document.getElementById('auto_eff').textContent = (p.efficiency * 100).toFixed(1) + '%';
+            document.getElementById('auto_tcog').textContent = (p.cogging_torque_Nm || 0).toFixed(4) + ' Nm';
+            
+            // AI Judgment
+            const ai = data.ai_judgment;
+            if (ai) {
+                document.getElementById('ai_verdict').textContent = ai.verdict;
+                document.getElementById('ai_score').textContent = ai.score;
+                document.getElementById('ai_details').innerHTML = ai.details.map(d => `<div>• ${d}</div>`).join('');
+            }
+            
+            const setSrc = (id, src) => {
+                const el = document.getElementById(id);
+                if (el) el.src = src || '';
+            };
+            
+            setSrc('auto_pyleecan_img', data.pyleecan_image_base64);
+             setSrc('auto_mech_draw', data.mechanical_drawing_base64);
+             setSrc('auto_flux_map', data.flux_map_base64);
+            setSrc('auto_eff_map', data.efficiency_map_base64);
+            setSrc('auto_torque_curve', data.torque_curve_base64);
+            
+            autoResult.classList.remove('hidden');
+        } catch (err) {
+            alert('优化失败: ' + err);
+        } finally {
+            btn.textContent = oldText;
+            btn.disabled = false;
+        }
+    });
+  </script>
+</body>
+</html>

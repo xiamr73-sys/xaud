@@ -1,0 +1,5 @@
+runtime: python39
+entrypoint: gunicorn -b :$PORT monitor_app:app
+instance_class: F1
+automatic_scaling:
+  min_instances: 1

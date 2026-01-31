@@ -1,0 +1,35 @@
+# Docker Ignore File
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.git/
+.gitignore
+.DS_Store
+.idea/
+.vscode/
+Dockerfile
+cloudbuild.yaml
+README.md
+GCP_DEPLOY.md
+SERVERLESS_DEPLOY.md
+deploy_gcp.sh
+vercel.json
+*.log
+*.sh
+
+# Large files and folders
+*.zip
+*.csv
+*.pkl
+node_modules
+frontend
+KeilC51
+FU68xx_Haidware_Driver
+User
+ai_core
+bldc_data_gen

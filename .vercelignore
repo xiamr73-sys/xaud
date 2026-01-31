@@ -1,0 +1,24 @@
+# Vercel Ignore File
+node_modules
+*/node_modules
+**/*.zip
+**/*.csv
+**/*.log
+**/*.pkl
+**/*.obj
+**/*.o
+**/*.lst
+.git
+.DS_Store
+.trae
+.figma
+build
+dist
+
+# Ignore unrelated large folders
+KeilC51
+FU68xx_Haidware_Driver
+User
+ai_core
+bldc_data_gen
+frontend

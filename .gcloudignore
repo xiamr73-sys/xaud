@@ -1,0 +1,29 @@
+# Google Cloud Ignore File
+.git
+.gitignore
+.DS_Store
+node_modules
+frontend/node_modules
+venv
+.venv
+env
+__pycache__
+*.pyc
+*.log
+
+# Large files to exclude from upload
+*.zip
+*.csv
+*.pkl
+project_export.zip
+project_export_v2.zip
+bldc_dataset.csv
+bldc_motor_data_10k.csv
+
+# Unrelated project folders
+KeilC51
+FU68xx_Haidware_Driver
+User
+ai_core
+bldc_data_gen
+frontend
