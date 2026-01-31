@@ -12,8 +12,9 @@ venv/
 .DS_Store
 .idea/
 .vscode/
-Dockerfile
-cloudbuild.yaml
+# Dockerfile should NOT be ignored for Cloud Build context
+# Dockerfile
+# cloudbuild.yaml
 README.md
 GCP_DEPLOY.md
 SERVERLESS_DEPLOY.md
