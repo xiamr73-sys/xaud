@@ -1,23 +1,23 @@
-# 必须使用 Python 3.12 镜像，因为你的依赖库（如 pandas 相关版本）要求 3.12+ 
+# 必须使用 3.12 以满足最新依赖包的要求
 FROM python:3.12-slim
 
-# 安装构建依赖（部分加密货币库编译时需要）
+# 安装 git (防止 pip install 需要从 github 拉取代码) 和构建工具
+# 注意：apt-get install 参数应该是 --no-install-recommends 而不是 --no-install-recommended
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
     git \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 # 复制并安装依赖
 COPY requirements.txt .
-# 关键：确保安装 pandas_ta，如果报错，请检查 requirements.txt 里的拼写是否为 pandas-ta
-# 增加 git 是因为我们从 git 安装 pandas_ta
 RUN pip install --no-cache-dir -r requirements.txt
 
+# 复制项目余下文件
 COPY . .
 
-# 适配 Cloud Run 端口
+# 适配你之前在 GCP 设置的 5001 端口
 ENV PORT=5001
 EXPOSE 5001
 
