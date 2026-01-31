@@ -1,31 +1,24 @@
-# Use official Python runtime as a parent image
-FROM python:3.9-slim
+# 必须使用 Python 3.12 镜像，因为你的依赖库（如 pandas 相关版本）要求 3.12+ 
+FROM python:3.12-slim
 
-# Set working directory
-WORKDIR /app
-
-# Install system dependencies
+# 安装构建依赖（部分加密货币库编译时需要）
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    python3-dev \
+    build-essential \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first to leverage Docker cache
-COPY requirements.txt .
+WORKDIR /app
 
-# Install python dependencies
+# 复制并安装依赖
+COPY requirements.txt .
+# 关键：确保安装 pandas_ta，如果报错，请检查 requirements.txt 里的拼写是否为 pandas-ta
+# 增加 git 是因为我们从 git 安装 pandas_ta
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application code
 COPY . .
 
-# Set environment variables
+# 适配 Cloud Run 端口
 ENV PORT=5001
-ENV FLASK_ENV=production
-ENV PYTHONUNBUFFERED=1
-
-# Expose the port
 EXPOSE 5001
 
-# Run the application
 CMD ["python", "monitor_app.py"]
