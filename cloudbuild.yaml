@@ -30,3 +30,6 @@ steps:
 images:
   - 'gcr.io/$PROJECT_ID/crypto-monitor:latest'
   - 'gcr.io/$PROJECT_ID/crypto-monitor:$SHORT_SHA'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
