@@ -383,6 +383,12 @@
                         
                         <div class="metrics">
                             <div class="metric-row">
+                                <span class="label">Count (T/Y):</span>
+                                <span style="color: var(--accent-yellow); font-weight: bold;">
+                                    ${item.alert_count_today || 1} / <span style="color: #666">${item.alert_count_yesterday || 0}</span>
+                                </span>
+                            </div>
+                            <div class="metric-row">
                                 <span class="label">OI:</span>
                                 <span class="${oiClass}">${item.open_interest_change > 0 ? '+' : ''}${formatNumber(item.open_interest_change)}%</span>
                             </div>

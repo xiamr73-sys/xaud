@@ -23,6 +23,11 @@ CACHE = {
     'adx_longs': [],
     'adx_shorts': [],
     'pre_breakouts': [],
+    'alert_counts': {
+        'today': {}, 
+        'yesterday': {}, 
+        'date': None # Track current date (YYYY-MM-DD)
+    },
     'last_updated': None,
     'is_updating': False
 }
