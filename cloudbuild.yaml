@@ -1,11 +1,11 @@
 steps:
   # 1. Build the container image
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/$PROJECT_ID/crypto-monitor:$SHORT_SHA', '-t', 'gcr.io/$PROJECT_ID/crypto-monitor:latest', '.']
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/crypto-monitor:latest', '.']
 
   # 2. Push the container image to Container Registry
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'gcr.io/$PROJECT_ID/crypto-monitor']
+    args: ['push', 'gcr.io/$PROJECT_ID/crypto-monitor:latest']
 
   # 3. Deploy container to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -15,9 +15,9 @@ steps:
       - 'deploy'
       - 'crypto-monitor'
       - '--image'
-      - 'gcr.io/$PROJECT_ID/crypto-monitor:$SHORT_SHA'
+      - 'gcr.io/$PROJECT_ID/crypto-monitor:latest'
       - '--region'
-      - 'us-central1'
+      - 'europe-west1'
       - '--platform'
       - 'managed'
       - '--allow-unauthenticated'
@@ -29,7 +29,6 @@ steps:
 
 images:
   - 'gcr.io/$PROJECT_ID/crypto-monitor:latest'
-  - 'gcr.io/$PROJECT_ID/crypto-monitor:$SHORT_SHA'
 
 options:
   logging: CLOUD_LOGGING_ONLY
