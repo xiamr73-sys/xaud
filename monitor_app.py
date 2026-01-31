@@ -500,6 +500,14 @@ async def update_data():
                 if pb_score >= 40:
                     analysis['is_pre_breakout'] = True
                     pre_breakouts_list.append(analysis)
+                    
+                    # Increment Alert Count
+                    if 'alert_counts' not in CACHE:
+                        CACHE['alert_counts'] = {}
+                    
+                    current_count = CACHE['alert_counts'].get(symbol, 0) + 1
+                    CACHE['alert_counts'][symbol] = current_count
+                    analysis['alert_count'] = current_count
                 else:
                     analysis['is_pre_breakout'] = False
 

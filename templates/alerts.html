@@ -311,6 +311,10 @@
                             <span class="label">RSI:</span>
                             <span style="color: #fff">${formatNumber(item.rsi)}</span>
                         </div>
+                        <div class="metric-item">
+                            <span class="label">Alerts:</span>
+                            <span style="color: var(--accent-yellow); font-weight: bold;">${item.alert_count || 1}</span>
+                        </div>
                     </div>
 
                     <div class="reasons-container">
