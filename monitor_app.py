@@ -685,6 +685,24 @@ def get_data():
     response.headers.add('Access-Control-Allow-Origin', '*')
     return response
 
+@app.route('/api/test_first_entry')
+def test_first_entry():
+    """
+    Simulate a 'First Entry' event to verify Discord First Entry Webhook.
+    """
+    if not DISCORD_WEBHOOK_FIRST_ENTRY:
+        return jsonify({'status': 'error', 'message': 'First Entry Webhook not configured'}), 400
+        
+    fake_symbol = "TEST-COIN"
+    fake_price = 123.45
+    msg = f"✨ **[TEST] 发现新潜力股！** {fake_symbol} 首次杀入前十 | 信号: 🟢 LONG | 价格: {fake_price}"
+    
+    try:
+        send_discord_alert(msg, webhook_url=DISCORD_WEBHOOK_FIRST_ENTRY)
+        return jsonify({'status': 'success', 'message': 'Test alert sent to First Entry Webhook'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 @app.route('/api/refresh', methods=['POST', 'GET'])
 def refresh_data():
     # Trigger manual update in background thread (Non-blocking)
