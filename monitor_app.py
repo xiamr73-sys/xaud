@@ -14,7 +14,8 @@ load_dotenv()
 
 API_KEY = os.getenv('BINANCE_API_KEY')
 SECRET_KEY = os.getenv('BINANCE_SECRET_KEY')
-DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
+DISCORD_WEBHOOK_GENERAL = os.getenv('DISCORD_WEBHOOK_GENERAL') or os.getenv('DISCORD_WEBHOOK_URL') # Fallback to old var
+DISCORD_WEBHOOK_FIRST_ENTRY = os.getenv('DISCORD_WEBHOOK_FIRST_ENTRY')
 
 app = Flask(__name__)
 
@@ -33,19 +34,23 @@ CACHE = {
     'discord_sent': {}, # Track last sent time for Discord alerts
     'last_updated': None,
     'is_updating': False,
-    'last_top_10': set() # Store last Top 10 symbols to detect new entries
+    'last_top_10': set(), # Store last Top 10 symbols to detect new entries
+    'seen_coins': set() # Store ALL coins seen in Top 10 to detect 'First Entry'
 }
 
-def send_discord_alert(content):
-    if not DISCORD_WEBHOOK_URL:
-        print("错误: 未找到环境变量 DISCORD_WEBHOOK_URL")
+def send_discord_alert(content, webhook_url=None):
+    # Default to General Webhook if not specified
+    target_url = webhook_url or DISCORD_WEBHOOK_GENERAL
+    
+    if not target_url:
+        print(f"错误: 未找到 Discord Webhook URL (Target: {webhook_url})")
         return
     
     payload = {"content": content}
     try:
-        response = requests.post(DISCORD_WEBHOOK_URL, json=payload)
+        response = requests.post(target_url, json=payload)
         response.raise_for_status()
-        print("Discord 推送成功")
+        print(f"Discord 推送成功 ({'General' if target_url == DISCORD_WEBHOOK_GENERAL else 'First Entry'})")
     except Exception as e:
         print(f"Discord 推送失败: {e}")
 
@@ -622,7 +627,7 @@ async def update_data():
         if discord_report:
             summary_msg = "\n".join(discord_report)
             summary_msg = f"📊 **Market Update ({time.strftime('%H:%M:%S')})**\n{summary_msg}"
-            send_discord_alert(summary_msg)
+            send_discord_alert(summary_msg, webhook_url=DISCORD_WEBHOOK_GENERAL)
         # -----------------------------------
         
         # Sort Pre-breakouts
@@ -711,10 +716,10 @@ if __name__ == '__main__':
     t.start()
     
     # Send startup notification
-    if DISCORD_WEBHOOK_URL:
+    if DISCORD_WEBHOOK_GENERAL:
         try:
             print("Sending startup notification to Discord...")
-            send_discord_alert("🟢 **Crypto Monitor Bot Started**\nReady to track market trends!")
+            send_discord_alert("🟢 **Crypto Monitor Bot Started**\nReady to track market trends!", webhook_url=DISCORD_WEBHOOK_GENERAL)
         except Exception as e:
             print(f"Failed to send startup notification: {e}")
     
