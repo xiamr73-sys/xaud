@@ -15,7 +15,7 @@ LIMIT = 100            # 获取K线数量
 BATCH_SIZE = 10        # 并发批次大小
 TOP_N = 200            # 筛选前 N 个成交量最大的币种
 SCORE_THRESHOLD = 60   # 报警分数阈值 (调整为 60)
-VERIFY_DELAY = 30 * 60 # 30分钟后回测验证 (秒)
+VERIFY_DELAY = 60 * 60 # 1小时后回测验证 (秒)
 
 # 记录活跃的验证任务，防止重复: {symbol: timestamp}
 active_verifications = {}
@@ -36,24 +36,29 @@ async def send_discord_alert(content):
     except Exception as e:
         logger.error(f"Discord 推送异常: {e}")
 
-async def verify_signal_performance(exchange, symbol, entry_price, score, signal_time_str):
+async def verify_signal_performance(symbol, entry_price, score, signal_time_str):
     """
     延迟验证信号的表现 (回测)
+    独立创建 exchange 连接，防止主程序重连导致连接失效
     """
+    exchange = None
     try:
-        # 等待 30 分钟
+        # 等待回测周期
         await asyncio.sleep(VERIFY_DELAY)
         
-        # 获取过去 ~40 分钟的 1m K线，覆盖 30分钟 窗口
+        # 建立独立连接
+        exchange = await get_exchange()
+        
+        # 获取过去 ~80 分钟的 1m K线，覆盖 60分钟 窗口
         # 注意: 这种方式是获取"当前"往前推的数据。因为我们是 sleep 后醒来，所以就是获取信号触发后的数据。
-        ohlcv = await exchange.fetch_ohlcv(symbol, timeframe='1m', limit=40)
+        ohlcv = await exchange.fetch_ohlcv(symbol, timeframe='1m', limit=80)
         
         if not ohlcv:
             return
 
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         
-        # 计算 30 分钟内的最高价和最低价
+        # 计算区间内的最高价和最低价
         # 假设 entry_price 是信号触发时的收盘价
         highest = df['high'].max()
         lowest = df['low'].min()
@@ -70,7 +75,7 @@ async def verify_signal_performance(exchange, symbol, entry_price, score, signal
             f"🧪 【信号回测】 {symbol} (Score: {score})\n"
             f"   • 触发时间: {signal_time_str}\n"
             f"   • 入场价格: {entry_price}\n"
-            f"   • 30m后现价: {current} ({final_change:+.2f}%)\n"
+            f"   • 1小时后现价: {current} ({final_change:+.2f}%)\n"
             f"   • 期间最高涨幅: {max_gain:+.2f}%\n"
             f"   • 期间最大回撤: {max_loss:+.2f}%"
         )
@@ -78,6 +83,9 @@ async def verify_signal_performance(exchange, symbol, entry_price, score, signal
     except Exception as e:
         logger.error(f"回测验证失败 {symbol}: {e}")
     finally:
+        # 关闭独立连接
+        if exchange:
+            await exchange.close()
         # 移除活跃任务标记
         if symbol in active_verifications:
             del active_verifications[symbol]
@@ -318,7 +326,7 @@ async def fetch_data_and_analyze(exchange, symbol, btc_dumping=False, top_10_sym
                 signal_time_str = pd.to_datetime(current_ts, unit='s').strftime('%Y-%m-%d %H:%M:%S')
                 # 启动后台任务
                 asyncio.create_task(
-                    verify_signal_performance(exchange, symbol, latest['close'], score, signal_time_str)
+                    verify_signal_performance(symbol, latest['close'], score, signal_time_str)
                 )
         
         return symbol, score
