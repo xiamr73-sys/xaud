@@ -206,4 +206,4 @@ if __name__ == '__main__':
     # 获取端口 (适配云环境)
     port = int(os.environ.get('PORT', 8080))
     print(f"启动 Web 看板: http://0.0.0.0:{port}")
-    web.run_app(init_app(), port=port)
+    web.run_app(init_app(), host='0.0.0.0', port=port)
