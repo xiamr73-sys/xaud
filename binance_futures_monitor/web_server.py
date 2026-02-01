@@ -33,9 +33,11 @@ def parse_alerts(file_path, n=20):
     我们需要提取时间和内容
     """
     if not os.path.exists(file_path):
-        return []
+        return [], {}
 
     alerts = []
+    symbol_stats = {} # 统计每个币种的出现次数 {symbol: {'count': 0, 'first_time': '...'}}
+    
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
@@ -60,6 +62,8 @@ def parse_alerts(file_path, n=20):
                     if current_alert:
                         current_alert['content'] = "\n".join(buffer)
                         alerts.append(current_alert)
+                        # 统计逻辑 (针对上一条)
+                        process_alert_stats(current_alert, symbol_stats)
                     
                     # 开始新的一条
                     parts = line.split(" | WARNING  | ")
@@ -76,13 +80,35 @@ def parse_alerts(file_path, n=20):
             if current_alert and buffer:
                 current_alert['content'] = "\n".join(buffer)
                 alerts.append(current_alert)
+                process_alert_stats(current_alert, symbol_stats)
                 
     except Exception as e:
         print(f"解析报警日志出错: {e}")
-        return []
+        return [], {}
 
-    # 返回最近的 n 条
-    return alerts[-n:]
+    # 返回最近的 n 条 和 完整的统计信息
+    return alerts[-n:], symbol_stats
+
+import re
+def process_alert_stats(alert, stats):
+    """
+    处理单条报警，更新统计信息
+    """
+    content = alert.get('content', '')
+    if "【高分报警】" not in content:
+        return
+
+    # 提取币种名称
+    # 尝试匹配 "🚨 【高分报警】 SYMBOL |"
+    # 或者之前的正则 /【高分报警】\s+([A-Z0-9\/:]+)/
+    # 为了兼容各种怪异名字，使用更宽泛的正则
+    match = re.search(r"【高分报警】\s+(.+?)\s+\|", content)
+    if match:
+        symbol = match.group(1).strip()
+        if symbol not in stats:
+            stats[symbol] = {'count': 0, 'first_time': alert['time']}
+        
+        stats[symbol]['count'] += 1
 
 async def index(request):
     """渲染主页"""
@@ -143,12 +169,13 @@ def parse_backtests(file_path, n=20):
 async def get_data(request):
     """API: 获取日志和报警数据"""
     logs = read_last_lines(LOG_FILE, n=50)
-    alerts = parse_alerts(ALERTS_FILE, n=20) # 获取最近 20 条报警
+    alerts, stats = parse_alerts(ALERTS_FILE, n=20) # 获取最近 20 条报警，但在 parse_alerts 内部统计了所有
     backtests = parse_backtests(LOG_FILE, n=10) # 获取最近 10 条回测
     
     return web.json_response({
         'logs': logs,
         'alerts': alerts,
+        'stats': stats, # 新增统计字段
         'backtests': backtests
     })
 

@@ -23,3 +23,9 @@ npm-debug.log*
 # Other
 node_modules/
 
+
+# Large files
+*.pkl
+*.zip
+*.csv
+

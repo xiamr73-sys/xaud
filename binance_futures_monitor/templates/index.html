@@ -158,29 +158,9 @@
                         
                         let html = '';
                         // 倒序展示，最新的在上面
-                        // 统计各币种出现次数
-                        const symbolCounts = {};
-                        // 记录每个币种首次出现时间
-                        const symbolFirstTime = {};
                         
-                        // 正序遍历（从旧到新）以捕获最早时间
-                        // data.alerts 默认可能是从旧到新或从新到旧，取决于后端
-                        // 后端 parse_alerts 简单读取，通常是顺序的（旧 -> 新）
-                        // 让我们确认一下：alerts 是 append 进去的，所以索引 0 是最早的
-                        
-                        data.alerts.forEach(alert => {
-                            // 从内容中提取币种名称
-                            const match = alert.content.match(/【高分报警】\s+([A-Z0-9\/:]+)/);
-                            if (match) {
-                                const symbol = match[1];
-                                symbolCounts[symbol] = (symbolCounts[symbol] || 0) + 1;
-                                
-                                // 如果是第一次遇到，记录时间
-                                if (!symbolFirstTime[symbol]) {
-                                    symbolFirstTime[symbol] = alert.time;
-                                }
-                            }
-                        });
+                        // 统计信息现在直接从后端获取 (data.stats)
+                        const stats = data.stats || {};
 
                         data.alerts.reverse().forEach(alert => {
                             // 检查是否是标准交易报警
@@ -220,6 +200,12 @@
                             const symbolMatch = alert.content.match(/【高分报警】\s+([A-Z0-9\/:]+)/);
                             if (symbolMatch) symbol = symbolMatch[1];
                             
+                            // 临时修复：处理 UNKNOWN 的问题
+                            if (symbol === "UNKNOWN") {
+                                const retryMatch = alert.content.match(/【高分报警】\s+(.+?)\s+\|/);
+                                if (retryMatch) symbol = retryMatch[1];
+                            }
+                            
                             // 2. 提取评分
                             let score = 0;
                             const scoreMatch = alert.content.match(/Score:\s+(\d+)/);
@@ -251,9 +237,10 @@
                                 // 也可以让卡片背景微微泛黄来高亮
                             }
 
-                            // 5. 检查出现次数 & 首轮时间
-                            const count = symbolCounts[symbol] || 0;
-                            const firstTime = symbolFirstTime[symbol] || "N/A";
+                            // 5. 检查出现次数 & 首轮时间 (使用后端统计的全局数据)
+                            const symbolStat = stats[symbol] || {count: 0, first_time: "N/A"};
+                            const count = symbolStat.count;
+                            const firstTime = symbolStat.first_time;
                             
                             // 简化时间显示，只取时分秒 (假设格式 YYYY-MM-DD HH:MM:SS...)
                             const shortFirstTime = firstTime.split(' ').length > 1 ? firstTime.split(' ')[1].split('.')[0] : firstTime;
