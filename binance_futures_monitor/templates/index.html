@@ -339,6 +339,31 @@
                 })
                 .catch(err => console.error('Error clearing alerts:', err));
         }
+
+        // 发送 Discord 测试消息
+        function testDiscord(btn) {
+            const originalText = btn.innerText;
+            btn.innerText = '发送中...';
+            btn.disabled = true;
+
+            fetch('/api/test_discord', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'ok') {
+                        alert('✅ ' + data.message);
+                    } else {
+                        alert('❌ ' + data.message);
+                    }
+                })
+                .catch(err => {
+                    console.error('Error testing discord:', err);
+                    alert('❌ 请求发送失败');
+                })
+                .finally(() => {
+                    btn.innerText = originalText;
+                    btn.disabled = false;
+                });
+        }
     </script>
 </body>
 </html>

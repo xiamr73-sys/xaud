@@ -188,6 +188,23 @@ async def clear_alerts(request):
     except Exception as e:
         return web.json_response({'status': 'error', 'message': str(e)}, status=500)
 
+async def test_discord(request):
+    """API: 发送 Discord 测试消息"""
+    webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
+    if not webhook_url:
+        return web.json_response({'status': 'error', 'message': '云端未配置 DISCORD_WEBHOOK_URL 环境变量'}, status=400)
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            payload = {"content": "✅ **Discord 连接测试成功**\n来自云端监控看板的手动测试。"}
+            async with session.post(webhook_url, json=payload) as response:
+                if response.status == 204:
+                    return web.json_response({'status': 'ok', 'message': '测试消息已发送，请检查 Discord 频道'})
+                else:
+                    return web.json_response({'status': 'error', 'message': f'发送失败，Discord 返回状态码: {response.status}'}, status=500)
+    except Exception as e:
+        return web.json_response({'status': 'error', 'message': str(e)}, status=500)
+
 async def init_app():
     app = web.Application()
     
@@ -198,6 +215,7 @@ async def init_app():
     app.router.add_get('/', index)
     app.router.add_get('/api/data', get_data)
     app.router.add_post('/api/clear_alerts', clear_alerts) # 新增清除接口
+    app.router.add_post('/api/test_discord', test_discord) # 新增测试接口
     
     return app
 
