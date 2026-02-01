@@ -547,35 +547,46 @@ async def update_data():
                 elif analysis['trend'] == 'STRONG_SHORT':
                     shorts.append(analysis)
                 
-        # Sort by Trend Score (Descending) and Keep Top 3
-        CACHE['longs'] = sorted(longs, key=lambda x: x.get('trend_score', 0), reverse=True)[:3]
-        CACHE['shorts'] = sorted(shorts, key=lambda x: x.get('trend_score', 0), reverse=True)[:3]
-        
+        # Sort by ADX (Descending) and Keep Top 3
+        CACHE['adx_longs'] = sorted(longs, key=lambda x: x.get('adx', 0), reverse=True)[:3]
+        CACHE['adx_shorts'] = sorted(shorts, key=lambda x: x.get('adx', 0), reverse=True)[:3]
+
         # --- Send Discord Summary Report ---
         discord_report = []
         
+        # 1. Top 3 Strong Longs (by Trend Score)
         if CACHE['longs']:
-            discord_report.append("🚀 **Top 3 STRONG LONGs**")
+            discord_report.append("🚀 **Top 3 STRONG LONGs (Score)**")
             for item in CACHE['longs']:
                 discord_report.append(f"• **{item['symbol']}** | Price: {item['close']} | Score: {item.get('trend_score', 0):.1f} | ADX: {item['adx']:.1f}")
         
+        # 2. Top 3 Strong Shorts (by Trend Score)
         if CACHE['shorts']:
-            # Add newline if longs exist
             prefix = "\n" if discord_report else ""
-            discord_report.append(f"{prefix}🔻 **Top 3 STRONG SHORTs**")
+            discord_report.append(f"{prefix}🔻 **Top 3 STRONG SHORTs (Score)**")
             for item in CACHE['shorts']:
                 discord_report.append(f"• **{item['symbol']}** | Price: {item['close']} | Score: {item.get('trend_score', 0):.1f} | ADX: {item['adx']:.1f}")
+
+        # 3. Top 3 High ADX Longs
+        if CACHE['adx_longs']:
+            prefix = "\n" if discord_report else ""
+            discord_report.append(f"{prefix}🔥 **Top 3 High ADX LONGs**")
+            for item in CACHE['adx_longs']:
+                discord_report.append(f"• **{item['symbol']}** | Price: {item['close']} | ADX: {item['adx']:.1f}")
+
+        # 4. Top 3 High ADX Shorts
+        if CACHE['adx_shorts']:
+            prefix = "\n" if discord_report else ""
+            discord_report.append(f"{prefix}❄️ **Top 3 High ADX SHORTs**")
+            for item in CACHE['adx_shorts']:
+                discord_report.append(f"• **{item['symbol']}** | Price: {item['close']} | ADX: {item['adx']:.1f}")
                 
-        # Only send if there are Strong Longs or Shorts
+        # Only send if there are reports
         if discord_report:
             summary_msg = "\n".join(discord_report)
             summary_msg = f"📊 **Market Update ({time.strftime('%H:%M:%S')})**\n{summary_msg}"
             send_discord_alert(summary_msg)
         # -----------------------------------
-        
-        # Sort by ADX (Descending) and Keep Top 3
-        CACHE['adx_longs'] = sorted(longs, key=lambda x: x.get('adx', 0), reverse=True)[:3]
-        CACHE['adx_shorts'] = sorted(shorts, key=lambda x: x.get('adx', 0), reverse=True)[:3]
         
         # Sort Pre-breakouts
         CACHE['pre_breakouts'] = sorted(pre_breakouts_list, key=lambda x: x.get('pre_breakout_score', 0), reverse=True)
