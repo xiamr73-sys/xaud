@@ -8,4 +8,4 @@ pandas
 pandas-ta
 ccxt
 numpy
-requestsrequests
+requests
