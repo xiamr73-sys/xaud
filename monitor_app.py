@@ -5,6 +5,7 @@ import time
 import ccxt.async_support as ccxt
 import pandas as pd
 import numpy as np
+import requests
 from flask import Flask, render_template, jsonify
 from dotenv import load_dotenv
 
@@ -13,6 +14,7 @@ load_dotenv()
 
 API_KEY = os.getenv('BINANCE_API_KEY')
 SECRET_KEY = os.getenv('BINANCE_SECRET_KEY')
+DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
 
 app = Flask(__name__)
 
@@ -28,9 +30,20 @@ CACHE = {
         'yesterday': {}, 
         'date': None # Track current date (YYYY-MM-DD)
     },
+    'discord_sent': {}, # Track last sent time for Discord alerts
     'last_updated': None,
     'is_updating': False
 }
+
+def send_discord_alert(content):
+    if not DISCORD_WEBHOOK_URL:
+        return
+    
+    try:
+        data = {"content": content}
+        requests.post(DISCORD_WEBHOOK_URL, json=data)
+    except Exception as e:
+        print(f"Failed to send Discord alert: {e}")
 
 def calculate_rsi(df, period=14):
     if len(df) < period + 1:
@@ -512,7 +525,19 @@ async def update_data():
                     
                     current_count = CACHE['alert_counts'].get(symbol, 0) + 1
                     CACHE['alert_counts'][symbol] = current_count
+                    
+                    analysis['alert_count_today'] = current_count
+                    analysis['alert_count_yesterday'] = CACHE['alert_counts'].get('yesterday', {}).get(symbol, 0)
+                    # Legacy field for alerts.html
                     analysis['alert_count'] = current_count
+
+                    # Discord Alert for Pre-breakout
+                    pb_last_sent = CACHE['discord_sent'].get(f"{symbol}_PB", 0)
+                    if time.time() - pb_last_sent > 3600:
+                        reasons_str = ", ".join(reasons)
+                        pb_msg = f"⚠️ **PRE-BREAKOUT**: {symbol} | Score: {pb_score} | Reasons: {reasons_str}"
+                        send_discord_alert(pb_msg)
+                        CACHE['discord_sent'][f"{symbol}_PB"] = time.time()
                 else:
                     analysis['is_pre_breakout'] = False
 
