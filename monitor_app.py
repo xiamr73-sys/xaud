@@ -674,6 +674,14 @@ if __name__ == '__main__':
     t.daemon = True
     t.start()
     
+    # Send startup notification
+    if DISCORD_WEBHOOK_URL:
+        try:
+            print("Sending startup notification to Discord...")
+            send_discord_alert("🟢 **Crypto Monitor Bot Started**\nReady to track market trends!")
+        except Exception as e:
+            print(f"Failed to send startup notification: {e}")
+    
     # Default port should be 5001 if not set, but Cloud Run passes PORT env var
     # If locally running without PORT set, default to 5001 to match user preference
     port = int(os.environ.get('PORT', 5001)) 
