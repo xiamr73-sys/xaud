@@ -672,9 +672,12 @@ def clean_nan(obj):
 @app.route('/api/data')
 def get_data():
     # Ensure JSON response is UTF-8 and clean of NaNs
-    cleaned_cache = clean_nan(CACHE)
+    # Filter out set objects (like last_top_10) which are not JSON serializable
+    filtered_cache = {k: v for k, v in CACHE.items() if not isinstance(v, set)}
+    cleaned_cache = clean_nan(filtered_cache)
     response = jsonify(cleaned_cache)
     response.headers['Content-Type'] = 'application/json; charset=utf-8'
+    response.headers.add('Access-Control-Allow-Origin', '*')
     return response
 
 @app.route('/api/refresh', methods=['POST', 'GET'])
