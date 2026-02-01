@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Crypto Analysis - Crypto Monitor</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        body {
+            background-color: #0f172a;
+            color: #e2e8f0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .container {
+            max-width: 900px;
+            margin-top: 50px;
+        }
+        .card {
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+        .card-header {
+            background-color: #0f172a;
+            border-bottom: 1px solid #334155;
+            padding: 1.5rem;
+            border-radius: 12px 12px 0 0 !important;
+        }
+        .form-control {
+            background-color: #0f172a;
+            border: 1px solid #334155;
+            color: #e2e8f0;
+        }
+        .form-control:focus {
+            background-color: #0f172a;
+            color: #e2e8f0;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 0.25rem rgba(59, 130, 246, 0.25);
+        }
+        .btn-primary {
+            background-color: #3b82f6;
+            border-color: #3b82f6;
+        }
+        .btn-primary:hover {
+            background-color: #2563eb;
+            border-color: #2563eb;
+        }
+        #result-content {
+            line-height: 1.8;
+            font-size: 1.05rem;
+        }
+        #result-content h1, #result-content h2, #result-content h3 {
+            color: #60a5fa;
+            margin-top: 1.5rem;
+        }
+        #result-content strong {
+            color: #93c5fd;
+        }
+        .loading-spinner {
+            display: none;
+            text-align: center;
+            padding: 2rem;
+        }
+        .navbar {
+            background-color: #1e293b;
+            border-bottom: 1px solid #334155;
+        }
+        .navbar-brand {
+            color: #60a5fa !important;
+            font-weight: bold;
+        }
+        .nav-link {
+            color: #94a3b8 !important;
+        }
+        .nav-link.active {
+            color: #e2e8f0 !important;
+        }
+    </style>
+</head>
+<body>
+
+    <nav class="navbar navbar-expand-lg navbar-dark mb-4">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">Crypto Monitor</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/">Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/alerts">Alerts</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/ai-analysis">AI Analysis</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h3 class="mb-0"><i class="fas fa-robot me-2"></i>AI Market Analysis</h3>
+                <p class="text-muted mb-0 mt-2">Get real-time technical analysis powered by AI</p>
+            </div>
+            <div class="card-body p-4">
+                <div class="row g-3 align-items-center">
+                    <div class="col-12">
+                        <div class="input-group mb-2">
+                            <span class="input-group-text bg-dark border-secondary text-muted"><i class="fas fa-key"></i></span>
+                            <input type="password" class="form-control bg-dark text-light border-secondary" id="apiKeyInput" placeholder="Optional: Enter OpenAI/DeepSeek API Key (overrides server config)">
+                        </div>
+                    </div>
+                    <div class="col-md-8">
+                        <label for="symbolInput" class="form-label visually-hidden">Symbol</label>
+                        <input type="text" class="form-control form-control-lg" id="symbolInput" placeholder="Enter Symbol (e.g. BTC/USDT)" value="BTC/USDT">
+                    </div>
+                    <div class="col-md-4">
+                        <button id="analyzeBtn" class="btn btn-primary btn-lg w-100">
+                            <i class="fas fa-search me-2"></i>Analyze
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="loading" class="loading-spinner">
+            <div class="progress mb-3" style="height: 25px; background-color: #334155;">
+                <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-primary" role="progressbar" style="width: 0%"></div>
+            </div>
+            <p id="progressText" class="text-muted">Initializing analysis...</p>
+        </div>
+
+        <div id="resultCard" class="card d-none">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0" id="resultTitle">Analysis Result</h5>
+                <span class="badge bg-success">Success</span>
+            </div>
+            <div class="card-body p-4">
+                <div id="result-content"></div>
+            </div>
+        </div>
+        
+        <div id="errorCard" class="alert alert-danger d-none mt-3" role="alert">
+            <i class="fas fa-exclamation-circle me-2"></i> <span id="errorMsg"></span>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('analyzeBtn').addEventListener('click', async () => {
+            const symbol = document.getElementById('symbolInput').value.trim();
+            const apiKey = document.getElementById('apiKeyInput').value.trim();
+            if (!symbol) return;
+
+            // Reset UI
+            document.getElementById('resultCard').classList.add('d-none');
+            document.getElementById('errorCard').classList.add('d-none');
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('analyzeBtn').disabled = true;
+
+            // Reset Progress Bar
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            progressBar.style.width = '0%';
+            progressBar.classList.remove('bg-success');
+            progressBar.classList.add('bg-primary');
+            
+            // Progress Simulation Logic
+            let progress = 0;
+            const progressInterval = setInterval(() => {
+                if (progress < 90) {
+                    // Fast start, then slow down
+                    if (progress < 30) {
+                        progress += 2;
+                        progressText.textContent = `Fetching 2300 historical candles for ${symbol}...`;
+                    } else if (progress < 60) {
+                        progress += 0.5;
+                        progressText.textContent = "Processing data and calculating technical indicators (RSI, MACD, BB)...";
+                    } else {
+                        progress += 0.2;
+                        progressText.textContent = "Consulting AI model for deep analysis (this may take a moment)...";
+                    }
+                    progressBar.style.width = `${progress}%`;
+                }
+            }, 100);
+
+            try {
+                const response = await fetch('/api/analyze', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ 
+                        symbol: symbol,
+                        api_key: apiKey 
+                    })
+                });
+
+                const data = await response.json();
+                
+                // Finish Progress
+                clearInterval(progressInterval);
+                progressBar.style.width = '100%';
+                progressBar.classList.remove('bg-primary');
+                progressBar.classList.add('bg-success');
+                progressText.textContent = "Analysis Complete!";
+
+                // Small delay to show 100%
+                await new Promise(r => setTimeout(r, 500));
+
+                if (data.success) {
+                    document.getElementById('resultTitle').textContent = `Analysis for ${data.symbol}`;
+                    // Parse Markdown
+                    document.getElementById('result-content').innerHTML = marked.parse(data.analysis);
+                    document.getElementById('resultCard').classList.remove('d-none');
+                } else {
+                    document.getElementById('errorMsg').textContent = data.message || 'Analysis failed.';
+                    document.getElementById('errorCard').classList.remove('d-none');
+                }
+            } catch (error) {
+                clearInterval(progressInterval);
+                document.getElementById('errorMsg').textContent = 'Network error: ' + error.message;
+                document.getElementById('errorCard').classList.remove('d-none');
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('analyzeBtn').disabled = false;
+            }
+        });
+        
+        // Allow Enter key
+        document.getElementById('symbolInput').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                document.getElementById('analyzeBtn').click();
+            }
+        });
+    </script>
+</body>
+</html>

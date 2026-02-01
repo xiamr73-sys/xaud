@@ -1,8 +1,7 @@
-# 必须使用 3.12 以满足最新依赖包的要求
-FROM python:3.12-slim
+# 使用 Python 3.9 作为基础镜像 (兼容性好)
+FROM python:3.9-slim
 
-# 安装 git (防止 pip install 需要从 github 拉取代码) 和构建工具
-# 注意：apt-get install 参数应该是 --no-install-recommends 而不是 --no-install-recommended
+# 安装系统依赖 (git 用于某些 pip 包)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     build-essential \
@@ -10,15 +9,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# 复制并安装依赖
-COPY requirements.txt .
+# 复制并安装依赖 (仅复制 requirements.txt 以利用缓存)
+COPY binance_futures_monitor/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 复制项目余下文件
-COPY . .
+# 复制项目代码
+COPY binance_futures_monitor ./binance_futures_monitor
+COPY start.sh .
 
-# 适配你之前在 GCP 设置的 5001 端口
-ENV PORT=5001
-EXPOSE 5001
+# 设置权限
+RUN chmod +x start.sh
 
-CMD ["python", "monitor_app.py"]
+# 设置环境变量
+ENV PYTHONUNBUFFERED=1
+ENV PORT=8080
+
+# 暴露端口
+EXPOSE 8080
+
+# 启动脚本
+CMD ["./start.sh"]

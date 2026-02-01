@@ -1,0 +1,630 @@
+C51 COMPILER V9.52.0.0   INTERRUPT                                                         12/02/2025 15:24:47 PAGE 1   
+
+
+C51 COMPILER V9.52.0.0, COMPILATION OF MODULE INTERRUPT
+OBJECT MODULE PLACED IN .\Output\Interrupt.obj
+COMPILER INVOKED BY: E:\tools\keil4\C51\BIN\C51.EXE ..\User\source\Application\Interrupt.c LARGE OMF2 WARNINGLEVEL(0) BR
+                    -OWSE FLOATFUZZY(4) INCDIR(..\User\include;..\FU68xx_Haidware_Driver\Include) DEBUG PRINT(.\Listings\Interrupt.lst) TABS(
+                    -2) OBJECT(.\Output\Interrupt.obj)
+
+line level    source
+
+   1          /*  --------------------------- (C) COPYRIGHT 2020 Fortiortech ShenZhen -----------------------------
+   2              File Name      : Interrupt.c
+   3              Author         : Fortiortech  Appliction Team
+   4              Version        : V1.0
+   5              Date           : 2020-04-10
+   6              Description    : This file contains .C file function used for Motor Control.
+   7              ----------------------------------------------------------------------------------------------------
+   8                                                 All Rights Reserved
+   9              ------------------------------------------------------------------------------------------------- */
+  10          #include "MyProject.h"
+  11          
+  12          uint16 xdata spidebug[4] = { 0 };
+  13          //uint8 Learn_Data[2]={0};
+  14          
+  15          extern  int32 speedRef;
+  16          
+  17          extern  uint8 SYST_Times;
+  18          uint8 Learn_Data[2]={0};
+  19          
+  20          /*  -------------------------------------------------------------------------------------------------
+  21              Function Name  : EXTI_INT
+  22              Description    : EXTI0 INT，Z
+  23              Date           : 2020-04-10
+  24              Parameter      : None
+  25              ------------------------------------------------------------------------------------------------- */
+  26          void EXTI_INT(void) interrupt 1  //LVW & TSD interrupt
+  27          {
+  28   1          if ((mcQEP.ZSaveFlag == 0) && (mcFocCtrl.SoftStart_Flag))
+  29   1          {
+  30   2              mcQEP.ZSaveFlag = 1;
+  31   2              mcQEP.ZCNTR = mcQEP.ZeroCntr;
+  32   2          mcQEP.ZeroCntr = mcQEP.CntrSumReal;
+  33   2          }
+  34   1          
+  35   1          IF0 = 0;
+  36   1      }
+  37          
+  38          
+  39          extern uint16 lightSwitch ;
+  40          
+  41          
+  42          void TIM1_INT(void) interrupt 5
+  43          {
+  44   1          if (ReadBit(TIM1_SR, T1BOIF))
+  45   1          {
+  46   2              ClrBit(TIM1_SR, T1BOIF);
+  47   2          }
+  48   1          
+  49   1          if (ReadBit(TIM1_SR, T1PDIF))
+  50   1          {
+  51   2              ClrBit(TIM1_SR, T1PDIF);
+  52   2          }
+  53   1          
+C51 COMPILER V9.52.0.0   INTERRUPT                                                         12/02/2025 15:24:47 PAGE 2   
+
+  54   1          if (ReadBit(TIM1_SR, T1BDIF))
+  55   1          {
+  56   2              ClrBit(TIM1_SR, T1BDIF);
+  57   2          }
+  58   1      }
+  59          
+  60          
+  61          /*  -------------------------------------------------------------------------------------------------
+  62              Function Name  : DRV_ISR
+  63              Description    : FOC中断(Drv中断),每个载波周期执行一次，用于处理响应较高的程�
+             -��，中断优先级第二。DCEN开了就会产生中断。
+  64              Date           : 2020-04-10
+  65              Parameter      : None
+  66              ------------------------------------------------------------------------------------------------- */
+  67          
+  68          void DRV_ISR(void) interrupt 3 //测试用时间   M法%78占空比    T法%67
+  69          {
+  70   1          int32 tempCntrSum;
+  71   1          static uint16 idata PeriodTime;
+  72   1          int16  *aa;
+  73   1          
+  74   1          if (ReadBit(DRV_SR, FGIF))
+  75   1          {
+  76   2              ClrBit(DRV_SR, FGIF);
+  77   2          }
+  78   1          
+  79   1          if (ReadBit(DRV_SR, DCIF))    // 比较中断
+  80   1          {
+  81   2                 
+  82   2              mcQEP.CntrOld    = mcQEP.Cntr;
+  83   2              mcQEP.Cntr       = TIM2__CNTR;   // 计数值
+  84   2              mcQEP.PeriodTime = TIM2__ARR;
+  85   2              mcQEP.CntrErr = mcQEP.Cntr - mcQEP.CntrOld;
+  86   2            
+  87   2      
+  88   2              if(UqPo.UqPoaiFlag == 0)
+  89   2              {
+  90   3                UqPo.ThetaN = FOC__THETA;
+  91   3                UqPo.IQN = FOC_IQREF;
+  92   3              }
+  93   2              
+  94   2              if (mcQEP.CntrErr < 0)
+  95   2              {
+  96   3                  if (mcQEP.Cntr > mcQEP.CntrOld)
+  97   3                  {
+  98   4                      mcQEP.Cycle--;
+  99   4                    
+ 100   4                  }
+ 101   3                  
+ 102   3                  mcQEP.Dir = 1;
+ 103   3              }
+ 104   2              
+ 105   2              if (mcQEP.CntrErr > 0)
+ 106   2              {
+ 107   3                  if (mcQEP.Cntr < mcQEP.CntrOld)
+ 108   3                  {
+ 109   4                      mcQEP.Cycle++;
+ 110   4                  }
+ 111   3                  
+ 112   3                  mcQEP.Dir = 0;
+ 113   3              }
+ 114   2                
+C51 COMPILER V9.52.0.0   INTERRUPT                                                         12/02/2025 15:24:47 PAGE 3   
+
+ 115   2               *(int16 *)(&tempCntrSum) = mcQEP.Cycle;
+ 116   2          
+ 117   2              mcQEP.CntrSumReal =  tempCntrSum + mcQEP.Cntr;
+ 118   2      
+ 119   2              mcQEP.CntrSum = (Learn.AngleBase << 1) - mcQEP.CntrSumReal - Learn.AngleBias;
+ 120   2              
+ 121   2              if (mcQEP.PeriodTime <= QEPPluseMinTime)
+ 122   2              {
+ 123   3                  mcQEP.PeriodTime = QEPPluseMinTime + 1;
+ 124   3              }
+ 125   2              
+ 126   2              MuiltS_L_MDU(mcQEP.Cntr, ETHETA_PER_PLASE, mcQEP.Theta);
+ 127   2      
+ 128   2              #if (Speed_Method == T_Method)
+                      {
+              
+                          DivQ_L_MDU(mcQEP.SpeedCalBaseH, mcQEP.SpeedCalBaseL, mcQEP.PeriodTime, mcQEP.AbsSpeed);
+                          mcQEP.SpeedAvg = mcQEP.AbsSpeed;
+                          
+                          if (mcQEP.OverFlowFlag)
+                          {
+                              mcQEP.AbsSpeed = 0;
+                          }
+                          
+                          if (mcQEP.DirOld != mcQEP.Dir) // 两次方向不同，速度给 0
+                          {
+                              mcQEP.AbsSpeed = 0;
+                              mcQEP.DirOld   = mcQEP.Dir;
+                          }
+                          else // 若两次方向相同计算速度
+                          {
+                              if (mcQEP.Dir)
+                              {
+                                  mcQEP.Speed =  -  mcQEP.AbsSpeed;
+                              }
+                              else
+                              {
+                                  mcQEP.Speed =     mcQEP.AbsSpeed;
+                              }
+                          }
+                          
+                          LPF_MDU(mcQEP.Speed, 5, mcFocCtrl.SpeedFlt, mcFocCtrl.SpeedFlt_LSB);
+                          
+                          if (mcFocCtrl.SpeedFlt < 2 && mcFocCtrl.SpeedFlt > -2)
+                          { mcFocCtrl.SpeedFlt = 0; }
+                      }
+                      #elif (Speed_Method == M_Method)
+ 162   2              {
+ 163   3                  /*************************2K的M法测速*******************************/
+ 164   3                  mcQEP.M_CNT++;
+ 165   3              
+ 166   3                  if (mcQEP.M_CNT == 8)
+ 167   3                  {
+ 168   4                      mcQEP.M_CNT = 0;
+ 169   4                      mcQEP.CntrM = mcQEP.Cntr;
+ 170   4                      mcQEP.PosDiff =  mcQEP.CntrM - mcQEP.CntrOldM;
+ 171   4                      mcQEP.PosDiffSum += mcQEP.PosDiff - mcQEP.PosDiffArray[mcQEP.ArrayPointer];
+ 172   4                      mcQEP.PosDiffArray[mcQEP.ArrayPointer] =       mcQEP.PosDiff;
+ 173   4                      mcQEP.ArrayPointer++;
+ 174   4              
+ 175   4                      if (mcQEP.ArrayPointer >= 4)
+ 176   4                      {
+C51 COMPILER V9.52.0.0   INTERRUPT                                                         12/02/2025 15:24:47 PAGE 4   
+
+ 177   5                          mcQEP.ArrayPointer = 0;
+ 178   5                      }
+ 179   4                      
+ 180   4                      
+ 181   4                    mcQEP.PosDiffSumTemp = mcQEP.PosDiffSum;
+ 182   4                    if (mcQEP.PosDiffSumTemp>200)
+ 183   4                    {
+ 184   5                      mcQEP.PosDiffSumTemp =200;
+ 185   5                    }
+ 186   4                    if (mcQEP.PosDiffSumTemp<-200)
+ 187   4                    {
+ 188   5                      mcQEP.PosDiffSumTemp= -200;
+ 189   5                    }
+ 190   4                      MuiltS_L_MDU(mcQEP.PosDiffSumTemp>>1, 375, mcQEP.SpeedM);
+ 191   4                      mcQEP.CntrOldM = mcQEP.CntrM;
+ 192   4                      LPF_MDU(mcQEP.SpeedM, 150, mcQEP.SpeedMFlt, mcQEP.SpeedMFlt_LSB);
+ 193   4              
+ 194   4                      if (mcQEP.SpeedMFlt < 2 && mcQEP.SpeedMFlt > -2)
+ 195   4                      { mcQEP.SpeedMFlt = 0; }
+ 196   4                  }
+ 197   3              }
+ 198   2              #endif
+ 199   2              
+ 200   2              if ((mcState == mcRun) && (mcFocCtrl.ThetaIQ_SOURCE == 0))
+ 201   2              {
+ 202   3      
+ 203   3                  if (GP42)
+ 204   3                  {
+ 205   4                    if(UqPo.PosiLockFlag == 0)
+ 206   4                    {
+ 207   5                      FOC__THETA  = mcQEP.Theta;
+ 208   5                    }
+ 209   4      
+ 210   4                  }
+ 211   3                  else 
+ 212   3                  {
+ 213   4                      FOC__THETA += 5;
+ 214   4                    GP15 = 1;
+ 215   4                  }
+ 216   3              }
+ 217   2      /*----------------------------------------切强拖与预定位--------------------------------------*/
+ 218   2              if(mcFocCtrl.Timedelay >= 5000)
+ 219   2              {
+ 220   3                if((mcFocCtrl.PosiErr <= 700) && (mcFocCtrl.PosiErr >= -700))
+ 221   3                {
+ 222   4                  mcFocCtrl.ThetaIQ_SOURCE = 1;
+ 223   4                  mcFocCtrl.UQTurnFlag = 1;
+ 224   4                }
+ 225   3              }
+ 226   2              if(mcFocCtrl.UQTurnFlag)
+ 227   2              {
+ 228   3                GP12 = ~GP12;
+ 229   3                FOC_IQREF = 0;
+ 230   3                SetBit(FOC_CR2, UDD);
+ 231   3                SetBit(FOC_CR2, UQD);
+ 232   3                FOC__UQ = UD_Align_Duty_Max;
+ 233   3                FOC__UD = 0;
+ 234   3                FOC__THETA += 3;
+ 235   3                DRV_CMR |= 0x3F;                         // U、V、W相输出
+ 236   3                MOE = 1;
+ 237   3                if((mcFocCtrl.PosiErr <= 80) && (mcFocCtrl.PosiErr >= -80))
+ 238   3                {
+C51 COMPILER V9.52.0.0   INTERRUPT                                                         12/02/2025 15:24:47 PAGE 5   
+
+ 239   4                  FOC__THETA = _Q15((float)(UqPo.ThetaN / 180.0));
+ 240   4                }
+ 241   3              }
+ 242   2              else
+ 243   2              {
+ 244   3                ClrBit(FOC_CR2, UDD);
+ 245   3                ClrBit(FOC_CR2, UQD);
+ 246   3              }
+ 247   2      /*-----------------------------------------------------------------------------------------*/       
+ 248   2              
+ 249   2              #if (DBG_MODE == SPI_DBG_SW)            // 软件调试模式
+ 250   2              {
+ 251   3                  spidebug[0] = FOC__THETA;//_Q15(Angle /180.0);//mcQEP.Cycle;
+ 252   3                  spidebug[1] = FOC__THETA;//mcQEP.CntrSumReal;
+ 253   3                  spidebug[2] = mcFocCtrl.LreanAngleFlt;//mcQEP.Theta;
+ 254   3                  spidebug[3] = mcQEP.CntrSumReal;//mcSP.PulsesNum;
+ 255   3              }
+ 256   2              #endif
+ 257   2              SetReg(DRV_SR, 0xFF, SYSTIE | DCIM1 | SYSTIF);
+ 258   2          }
+ 259   1      }
+ 260          
+ 261          void TIM2_INT(void) interrupt 4
+ 262          {
+ 263   1          if (ReadBit(TIM2_CR1, T2IR))
+ 264   1          {
+ 265   2              ClrBit(TIM2_CR1, T2IR);
+ 266   2          }
+ 267   1          
+ 268   1          if (ReadBit(TIM2_CR1, T2IP))
+ 269   1          {
+ 270   2              mcQEP.OverFlowFlag++;
+ 271   2              
+ 272   2              if (mcQEP.OverFlowFlag >= 3) //代表静止之后连续两次跳变
+ 273   2              {
+ 274   3                  mcQEP.OverFlowFlag = 0;
+ 275   3                  ClrBit(TIM2_CR1, T2IPE);
+ 276   3              }
+ 277   2              
+ 278   2              ClrBit(TIM2_CR1, T2IP);
+ 279   2          }
+ 280   1          
+ 281   1          if (ReadBit(TIM2_CR1, T2IF))   // 溢出中断,用于判断静止,时间为349ms。
+ 282   1          {
+ 283   2              //        if(mcQEP.OverFlowFlag<10)
+ 284   2              //            mcQEP.OverFlowFlag++;
+ 285   2              mcQEP.OverFlowFlag = 1;
+ 286   2              SetBit(TIM2_CR1, T2IPE);
+ 287   2              ClrBit(TIM2_CR1, T2IF);
+ 288   2          }
+ 289   1      }
+ 290          
+ 291          
+ 292          /*  -------------------------------------------------------------------------------------------------
+ 293              Function Name  : CMP_ISR
+ 294              Description    : CMP0/1/2：顺逆风判断
+ 295              Date           : 2020-04-10
+ 296              Parameter      : None
+ 297              ------------------------------------------------------------------------------------------------- */
+ 298          void CMP_ISR(void) interrupt 7
+ 299          {
+ 300   1          if (ReadBit(CMP_SR, CMP0IF) || ReadBit(CMP_SR, CMP1IF) || ReadBit(CMP_SR, CMP2IF)) //当检测到比�
+C51 COMPILER V9.52.0.0   INTERRUPT                                                         12/02/2025 15:24:47 PAGE 6   
+
+             -�器中断时
+ 301   1          {
+ 302   2              ClrBit(CMP_SR, CMP0IF | CMP1IF | CMP2IF);
+ 303   2          }
+ 304   1      }
+ 305          
+ 306          
+ 307          /*  -------------------------------------------------------------------------------------------------
+ 308              Function Name  : SYStick_INT
+ 309              Description    : 1ms定时器中断（SYS TICK中断），用于处理附加功能，如控制环路�
+             -�应、各种保护等。中断优先级低于FO中断和FOC中断。
+ 310              Date           : 2020-04-10
+ 311              Parameter      : None
+ 312              ------------------------------------------------------------------------------------------------- */
+ 313          uint32 Timex = 0;
+ 314          
+ 315          
+ 316          void SYStick_INT(void) interrupt 10  //2K的执行周期  %55
+ 317          {
+ 318   1          static uint8  SYST_Cnt;
+ 319   1          
+ 320   1          if (ReadBit(DRV_SR, SYSTIF))          // SYS TICK中断
+ 321   1          {
+ 322   2            mcQEP.g1msflg++;
+ 323   2              //          GP05 = 1;
+ 324   2              SetBit(ADC_CR, ADCBSY);           //使能ADC的DCBUS采样
+ 325   2        
+ 326   2              
+ 327   2              if (Uart.EnableTimeCnt == 1)
+ 328   2              {
+ 329   3                  SYST_Cnt++;//
+ 330   3                  
+ 331   3                  if (SYST_Cnt == SYST_Times) //2次1ms
+ 332   3                  {
+ 333   4                      SYST_Cnt = 0;
+ 334   4                      Uart.Go_Time++;
+ 335   4                  }
+ 336   3              }
+ 337   2              if(mcFocCtrl.Timedelay <= 10000)
+ 338   2              {
+ 339   3                mcFocCtrl.Timedelay++;
+ 340   3              }
+ 341   2              
+ 342   2              /* -----环路响应，如速度环、转矩环、功率环等----- */
+ 343   2              Speed_response();  //152us
+ 344   2              LPF_MDU(ADC14_DR, 100, mcFocCtrl.mcDcbusFlt, mcFocCtrl.mcDcbusFlt_LSB);
+ 345   2              mcFocCtrl.mcDcbusFlt = ADC14_DR;
+ 346   2              Fault_Detection(); //52us
+ 347   2              //Fault_Communication();
+ 348   2              GP00 = ~GP00;
+ 349   2              /* ****电机状态机的时序处理**** */
+ 350   2              if (mcFocCtrl.State_Count > 0)
+ 351   2              {
+ 352   3                  mcFocCtrl.State_Count--;
+ 353   3              }
+ 354   2              if (mcFocCtrl.SoftStart_Flag == 0)
+ 355   2              {
+ 356   3                  mcFocCtrl.SoftStart_Count++;
+ 357   3                  if (mcFocCtrl.SoftStart_Count > 200) 
+ 358   3                  {
+ 359   4                      mcQEP.ZSaveFlag = 0;
+ 360   4                      mcFocCtrl.SoftStart_Flag = 1;
+C51 COMPILER V9.52.0.0   INTERRUPT                                                         12/02/2025 15:24:47 PAGE 7   
+
+ 361   4                  }
+ 362   3              }
+ 363   2              if (GP42 == 0)
+ 364   2              {           
+ 365   3                  if (mcFocCtrl.Lrean_State == 1)
+ 366   3                  {
+ 367   4      
+ 368   4                      mcFocCtrl.Lrean_State = 0;
+ 369   4                    
+ 370   4                      Learn_Data[0] = mcFocCtrl.LreanAngle >> 8;
+ 371   4                      Learn_Data[1] = mcFocCtrl.LreanAngle;
+ 372   4                      EA = 0;
+ 373   4                      Flash_ErasePageRom(STARTPAGEROMADDRESS);
+ 374   4                      
+ 375   4                      Flash_Sector_Write(STARTPAGEROMADDRESS, Learn_Data[0]);
+ 376   4                      Flash_Sector_Write(STARTPAGEROMADDRESS+1, Learn_Data[1]);
+ 377   4                      EA = 1;            
+ 378   4                  }
+ 379   3              } 
+ 380   2      
+ 381   2              /***********测试转动*********************/
+ 382   2              #if OPEN_TEST
+                      
+                      if (mcFocCtrl.CtrlMode == 1 && Power.Reign == 1)
+                      {
+                          Timex++;
+                          
+                          if (Timex == 80000)
+                          {
+                              Timex = 0;
+                              mcSP.PulsesNum      = P_Value(134);
+                              Speed_Handle(0X18);
+                          }
+                          
+                          if (Timex == 60000)
+                          {
+                              mcSP.PulsesNum      = P_Value(10) ;
+                              Speed_Handle(SpeedLevel);
+                          }
+                          else if (Timex == 40000)
+                          {
+                              mcSP.PulsesNum      = P_Value(134);
+                              Speed_Handle(0X18);
+                          }
+                          else if (Timex == 20000)
+                          {
+                              mcSP.PulsesNum      = P_Value(210);
+                              Speed_Handle(0X18);
+                          }
+                      }
+                      
+                      #endif
+ 413   2              SetReg(DRV_SR, 0xFF, SYSTIE | DCIM1 | DCIF);
+ 414   2          }
+ 415   1      }
+ 416          /*  -------------------------------------------------------------------------------------------------
+ 417              Function Name  : CMP3_INT
+ 418              Description    : CMP3：硬件比较器过流保护，关断输出，中断优先级最高
+ 419              Date           : 2020-04-10
+ 420              Parameter      : None
+ 421              ------------------------------------------------------------------------------------------------- */
+ 422          
+C51 COMPILER V9.52.0.0   INTERRUPT                                                         12/02/2025 15:24:47 PAGE 8   
+
+ 423          void CMP3_INT(void)  interrupt 12
+ 424          {
+ 425   1          if (ReadBit(CMP_SR, CMP3IF))
+ 426   1          {
+ 427   2              if (mcState != mcPosiCheck)
+ 428   2              {
+ 429   3                  FaultProcess();                                                                   // 关闭输
+             -出
+ 430   3                  mcFaultSource = FaultHardOVCurrent;                                                 // 硬件�
+             -��流保护
+ 431   3                  mcState       = mcFault;
+ 432   3                  // 状态为mcFault
+ 433   3              }
+ 434   2              
+ 435   2              ClrBit(CMP_SR, CMP3IF);
+ 436   2          }
+ 437   1      }
+ 438          
+ 439          /*---------------------------------------------------------------------------*/
+ 440          /*  Name     :   void TIM4_INT(void) interrupt 10
+ 441              /* Input    :   NO
+ 442              /* Output   :   NO
+ 443              /* Description: TIM4会用到FG输出，如果TIM4用作基本定时器需要注意
+ 444              /*---------------------------------------------------------------------------*/
+ 445          //void TIM4_INT(void) interrupt 11
+ 446          //{
+ 447          //    /*TIM4 Interrupt*/
+ 448          //    if (ReadBit(TIM4_CR1, T4IR))
+ 449          //    {
+ 450          //        ClrBit(TIM4_CR1, T4IR);
+ 451          //    }
+ 452          //
+ 453          //    if (ReadBit(TIM4_CR1, T4IP)) //周期中断
+ 454          //    {
+ 455          //        ClrBit(TIM4_CR1, T4IP);
+ 456          //    }
+ 457          //
+ 458          //    if (ReadBit(TIM4_CR1, T4IF))
+ 459          //    {
+ 460          //        ClrBit(TIM4_CR1, T4IF);
+ 461          //    }
+ 462          //}
+ 463          
+ 464          void USART2_INT(void)  interrupt 14
+ 465          {
+ 466   1          uint8 Uredata = 0;
+ 467   1          
+ 468   1          if (ReadBit(UT2_CR, UT2TI))
+ 469   1          {
+ 470   2              ClrBit(UT2_CR, UT2TI);
+ 471   2              
+ 472   2              if (Uart.SendCnt < Uart.T_Len - 1)
+ 473   2              {
+ 474   3                  Uart.SendCnt++;
+ 475   3                  UART_SendData(Uart.T_DATA[Uart.SendCnt]);
+ 476   3              }
+ 477   2              
+ 478   2              //        if(Uart.T_DATA[Uart.SendCnt] != 0xff)
+ 479   2              //        {
+ 480   2              //            Uart.SendCnt++;
+ 481   2              //            UART_SendData(Uart.T_DATA[Uart.SendCnt]);
+ 482   2              //        }
+C51 COMPILER V9.52.0.0   INTERRUPT                                                         12/02/2025 15:24:47 PAGE 9   
+
+ 483   2          }
+ 484   1          
+ 485   1          if (ReadBit(UT2_CR, UT2RI) )
+ 486   1          {
+ 487   2              ClrBit(UT2_CR, UT2RI);
+ 488   2              Uredata = UT2_DR;
+ 489   2              
+ 490   2              switch (Uart.Read_State)
+ 491   2              {
+ 492   3                  case 0:
+ 493   3                      if (Uredata == 0x81)
+ 494   3                      {
+ 495   4                          Uart.R_DATA[Uart.UARxCnt++] = Uredata;
+ 496   4                          Uart.Read_State = 1;
+ 497   4                      }
+ 498   3                      
+ 499   3                      //                else
+ 500   3                      //                {
+ 501   3                      //                   Uart.UARxCnt = 0;
+ 502   3                      //                   Uart.ResponceFlag = 0;
+ 503   3                      //                   Uart.Read_State =  0;
+ 504   3                      //                   Send_NoActive(); //无效指令 帧头不对
+ 505   3                      //                }
+ 506   3                      break;
+ 507   3                      
+ 508   3                  case 1:
+ 509   3                      Uart.R_DATA[Uart.UARxCnt++] = Uredata;
+ 510   3                      
+ 511   3                      if (Uart.UARxCnt >= 20)
+ 512   3                      {
+ 513   4                          Uart.UARxCnt = 0;
+ 514   4                          Uart.ResponceFlag = 0;
+ 515   4                          Uart.Read_State =  0;
+ 516   4                      }
+ 517   3                      
+ 518   3                      if (Uredata == 0Xff)//&& Uart.UARxCnt==15)
+ 519   3                      {
+ 520   4                          if (Uart.UARxCnt >= 4 && Uart.UARxCnt <= 15)
+ 521   4                          {
+ 522   5                              Uart.UARxCnt = 0;
+ 523   5                              Uart.ResponceFlag = 1;
+ 524   5                              Uart.Read_State =  0;
+ 525   5                          }
+ 526   4                          else
+ 527   4                          {
+ 528   5                              Uart.UARxCnt = 0;
+ 529   5                              Uart.ResponceFlag = 0;
+ 530   5                              Uart.Read_State =  0;
+ 531   5                              Send_NoActive(); //无效指令  长度不对
+ 532   5                          }
+ 533   4                      }
+ 534   3                      
+ 535   3                      break;
+ 536   3                      
+ 537   3                  default:
+ 538   3                      Uart.UARxCnt = 0;
+ 539   3                      Uart.ResponceFlag = 0;
+ 540   3                      Uart.Read_State =  0;
+ 541   3                      break;
+ 542   3              }
+ 543   2          }
+ 544   1      }
+C51 COMPILER V9.52.0.0   INTERRUPT                                                         12/02/2025 15:24:47 PAGE 10  
+
+ 545          
+ 546          
+ 547          void TIM3_INT(void) interrupt 9
+ 548          {
+ 549   1          if (ReadBit(TIM3_CR1, T3IR))
+ 550   1          {
+ 551   2              ClrBit(TIM3_CR1, T3IR);
+ 552   2          }
+ 553   1          
+ 554   1          if (ReadBit(TIM3_CR1, T3IP))//周期中断
+ 555   1          {
+ 556   2              mcPwmInput.TimeDR    = TIM3__DR;
+ 557   2              mcPwmInput.TimeARR        = TIM3__ARR;
+ 558   2              mcPwmInput.PwmUpdateFlag = 1;
+ 559   2              ClrBit(TIM3_CR1, T3IP);
+ 560   2          }
+ 561   1          
+ 562   1          if (ReadBit(TIM3_CR1, T3IF))
+ 563   1          {
+ 564   2              if (ReadBit(P1, PIN1))//PWM 100%输出
+ 565   2              {
+ 566   3                  mcPwmInput.TimeDR = 4000;
+ 567   3                  mcPwmInput.TimeARR     = 4000;
+ 568   3              }
+ 569   2              else//PWM 为0%
+ 570   2              {
+ 571   3                  mcPwmInput.TimeDR = 0;
+ 572   3                  mcPwmInput.TimeARR     = 4000;
+ 573   3              }
+ 574   2              
+ 575   2              mcPwmInput.PwmUpdateFlag = 1;
+ 576   2              ClrBit(TIM3_CR1, T3IF);
+ 577   2          }
+ 578   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   2490    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =     15       8
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =      2    ----
+   BIT SIZE         =   ----    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

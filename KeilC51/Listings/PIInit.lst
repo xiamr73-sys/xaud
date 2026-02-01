@@ -1,0 +1,125 @@
+C51 COMPILER V9.52.0.0   PIINIT                                                            12/02/2025 15:24:49 PAGE 1   
+
+
+C51 COMPILER V9.52.0.0, COMPILATION OF MODULE PIINIT
+OBJECT MODULE PLACED IN .\Output\PIInit.obj
+COMPILER INVOKED BY: E:\tools\keil4\C51\BIN\C51.EXE ..\User\source\Hardware\PIInit.c LARGE OMF2 WARNINGLEVEL(0) BROWSE F
+                    -LOATFUZZY(4) INCDIR(..\User\include;..\FU68xx_Haidware_Driver\Include) DEBUG PRINT(.\Listings\PIInit.lst) TABS(2) OBJECT
+                    -(.\Output\PIInit.obj)
+
+line level    source
+
+   1          /*  --------------------------- (C) COPYRIGHT 2020 Fortiortech ShenZhen -----------------------------
+   2              File Name      : PIInit.c
+   3              Author         : Fortiortech  Appliction Team
+   4              Version        : V1.0
+   5              Date           : 2020-04-11
+   6              Description    : This file contains PI initial function used for Motor Control.
+   7              ----------------------------------------------------------------------------------------------------
+   8                                                 All Rights Reserved
+   9              ------------------------------------------------------------------------------------------------- */
+  10          /* Includes -------------------------------------------------------------------------------------*/
+  11          #include "Myproject.h"
+  12          //void PI_Init(void)
+  13          //{
+  14          //    PI0_KP  = SKP;
+  15          //    PI0_KI  = SKI;
+  16          //    PI0_UKH = 0;
+  17          //    PI0_UKL = 0;
+  18          //    PI0_EK  = 0;
+  19          //    PI0_EK1 = 0;
+  20          //    PI0_UKMAX = SOUTMAX;
+  21          //    PI0_UKMIN = SOUTMIN;
+  22          //    SetBit(PI_CR , PI0STA);          // Start PI
+  23          //    while (ReadBit(PI_CR , PIBSY));
+  24          //}
+  25          
+  26          //void PI_Init(void)
+  27          //{
+  28          //    PI1_KP  = SKP;
+  29          //    PI1_KI  = SKI;
+  30          //    PI1_UKH = 0;
+  31          //    PI1_UKL = 0;
+  32          //    PI1_EK  = 0;
+  33          //    PI1_EK1 = 0;
+  34          //    PI1_UKMAX = SOUTMAX;
+  35          //    PI1_UKMIN = SOUTMIN;
+  36          //    SetBit(PI_CR , PI1STA);          // Start PI
+  37          //    while (ReadBit(PI_CR , PIBSY));
+  38          //}
+  39          
+  40          //void PI_Init(void)
+  41          //{
+  42          //    PI2_KP  = SKP;
+  43          //    PI2_KI  = SKI;
+  44          //    PI2_UKH = 0;
+  45          //    PI2_UKL = 0;
+  46          //    PI2_EK  = 0;
+  47          //    PI2_EK1 = 0;
+  48          //    PI2_KD = 0x05;
+  49          //    PI2_EK2 = 0;
+  50          //    PI2_UKMAX = SOUTMAX;
+  51          //    PI2_UKMIN = SOUTMIN;
+  52          //    SetBit(PI_CR , PI2STA);          // Start PI
+  53          //    while (ReadBit(PI_CR , PIBSY));
+C51 COMPILER V9.52.0.0   PIINIT                                                            12/02/2025 15:24:49 PAGE 2   
+
+  54          //}
+  55          
+  56          
+  57          /*  ----------------------------------------------------------------------------------------------*/
+  58          /*  Function Name  : PI_Init
+  59              /*  Description    : PI_Init
+  60              /*  Date           : 2020-09-06
+  61              /*  Parameter      : None
+  62              /*  ----------------------------------------------------------------------------------------------*/
+  63          void PI_Init(void)
+  64          {
+  65   1          
+  66   1          PI2_KP  = SKP;
+  67   1          PI2_KI  = SKI;
+  68   1          PI2_UKH = 0;
+  69   1          PI2_UKL = 0;
+  70   1          PI2_EK  = 0;
+  71   1          PI2_EK1 = 0;
+  72   1          PI2_KD  = SKD;
+  73   1          PI2_EK2 = 0;
+  74   1          PI2_UKMAX = SOUTMAX;
+  75   1          PI2_UKMIN = SOUTMIN;
+  76   1          SetBit(PI_CR, PI2STA);           // Start PI
+  77   1          
+  78   1          while (ReadBit(PI_CR, PIBSY));
+  79   1        
+  80   1        
+  81   1      //    PI3_KP  = PosKP;
+  82   1      //    PI3_KI  = PosKI;
+  83   1      //    PI3_UKH = 0;
+  84   1      //    PI3_UKL = 0;
+  85   1      //    PI3_EK  = 0;
+  86   1      //    PI3_EK1 = 0;
+  87   1      //    PI3_KD = PosKD;
+  88   1      //    PI3_EK2 = 0;
+  89   1      //    PI3_UKMAX = POUTMAX;
+  90   1      //    PI3_UKMIN = POUTMIN;
+  91   1      //    SetBit(PI_CR, PI3STA);           // Start PI
+  92   1      //    
+  93   1      //    while (ReadBit(PI_CR, PIBSY));
+  94   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =     77    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

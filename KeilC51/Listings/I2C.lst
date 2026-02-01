@@ -1,0 +1,100 @@
+C51 COMPILER V9.52.0.0   I2C                                                               12/02/2025 15:24:49 PAGE 1   
+
+
+C51 COMPILER V9.52.0.0, COMPILATION OF MODULE I2C
+OBJECT MODULE PLACED IN .\Output\I2C.obj
+COMPILER INVOKED BY: E:\tools\keil4\C51\BIN\C51.EXE ..\User\source\Hardware\I2C.c LARGE OMF2 WARNINGLEVEL(0) BROWSE FLOA
+                    -TFUZZY(4) INCDIR(..\User\include;..\FU68xx_Haidware_Driver\Include) DEBUG PRINT(.\Listings\I2C.lst) TABS(2) OBJECT(.\Out
+                    -put\I2C.obj)
+
+line level    source
+
+   1          /*  --------------------------- (C) COPYRIGHT 2020 Fortiortech ShenZhen -----------------------------
+   2              File Name      : I2C.c
+   3              Author         : Fortiortech  Appliction Team
+   4              Version        : V1.0
+   5              Date           : 2020-04-11
+   6              Description    : This file contains .C file function used for Motor Control.
+   7              ----------------------------------------------------------------------------------------------------
+   8                                                 All Rights Reserved
+   9              ------------------------------------------------------------------------------------------------- */
+  10          #include "Myproject.h"
+  11          /*
+  12              void I2C_Init_Master(void)
+  13              {
+  14              SetBit(P0_PU , P00);
+  15              SetBit(P0_PU , P01);
+  16              // I2C initial
+  17              SetBit(I2C_CR , I2CMS);     //主从模式选择    0-->Slave Mode  1-->Host Mode
+  18              ClrBit(I2C_CR , I2CSPD1);   //00-->100kHz       01-->400kHz
+  19              SetBit(I2C_CR , I2CSPD0);   //10-->1MHz         11-->RSV
+  20              ClrBit(I2C_CR , I2CIE);     //中断使能         0-->Disable 1-->Enable
+  21              I2C_ID = 0xD0;
+  22              SetBit(I2C_ID , GC);    //广播呼叫使能    0-->Disable 1-->Enable
+  23              SetBit(I2C_CR , I2CEN); //I2C使能     0-->Disable 1-->Enable
+  24              }
+  25          
+  26              void I2C_ID_Start(bool rw)
+  27              {
+  28              if(rw)
+  29                  SetBit(I2C_SR , DMOD);
+  30              else
+  31                  ClrBit(I2C_SR , DMOD);
+  32              SetBit(I2C_SR , I2CSTA);    //1-->发送START或RESTART和地址字节
+  33              while(!ReadBit(I2C_SR , STR));
+  34              ClrBit(I2C_SR , STR);
+  35              }
+  36          
+  37              void I2C_Addr_Write(unsigned char addr,unsigned char wdata)
+  38              {
+  39              I2C_ID_Start(0);    // ID write
+  40          
+  41              I2C_DR = addr;      // Slave reg addr.
+  42              while(!ReadBit(I2C_SR , STR));
+  43              ClrBit(I2C_SR , STR);
+  44          
+  45              I2C_DR = wdata;     // Slave reg data.
+  46              while(!ReadBit(I2C_SR , STR));
+  47              ClrBit(I2C_SR , STR);
+  48              SetBit(I2C_SR , I2CSTP);    //1-->发送STOP
+  49              }
+  50          
+  51              unsigned char I2C_Addr_Read(char addr)
+  52              {
+  53              unsigned char rd_data;
+C51 COMPILER V9.52.0.0   I2C                                                               12/02/2025 15:24:49 PAGE 2   
+
+  54              //write process
+  55              I2C_ID_Start(0);  // write+ID
+  56              I2C_DR = addr;   // write reg. addr
+  57              while(!ReadBit(I2C_SR , STR));
+  58              ClrBit(I2C_SR , STR);
+  59              //    SetBit(I2C_SR , I2CSTP);  //1-->发送STOP
+  60          
+  61              //read process
+  62              I2C_ID_Start(1);  // read+ID
+  63              while(!ReadBit(I2C_SR , STR));
+  64              ClrBit(I2C_SR , STR);
+  65              rd_data = (unsigned char)(I2C_DR); // read data
+  66              SetBit(I2C_SR , NACK);      //第9位发送NACK
+  67              SetBit(I2C_SR , I2CSTP);    //1-->发送STOP
+  68              return(rd_data);
+  69              }*/
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   ----    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

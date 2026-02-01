@@ -1,0 +1,145 @@
+/* --------------------------- (C) COPYRIGHT 2020 Fortiortech ShenZhen -----------------------------
+    File Name      : MotorSpeed.c
+    Author         : Fortiortech  Appliction Team
+    Version        : V1.0
+    Date           : 2020-04-10
+    Description    : This file contains .C file function used for Motor Control.
+----------------------------------------------------------------------------------------------------
+                                       All Rights Reserved
+------------------------------------------------------------------------------------------------- */
+#include <MyProject.h>
+/* Private variables ----------------------------------------------------------------------------*/
+MotStaType mcState;
+MotStaM    McStaSet;
+float PwmDutyFlt;
+float Angle;
+
+/* -------------------------------------------------------------------------------------------------
+    Function Name  : MC_Control
+    Description    : 电机控制状态机
+    Date           : 2020-04-10
+    Parameter      : None
+------------------------------------------------------------------------------------------------- */
+extern uint8 AlignFlag;
+
+void MC_Control(void)
+{
+    switch (mcState)
+    {
+        case mcReady:
+            Motor_Ready();
+            
+            if (mcCurOffset.OffsetFlag == 1 && isCtrlPowerOn == true)
+            {
+                mcState                 = mcInit;
+                mcCurOffset.OffsetFlag  = 0;
+            }
+            
+            break;
+            
+        case mcInit:
+            Motor_Init();
+            #if (IPMState == IPMtest)                           // 正常按电机状态机运行
+            {
+                mcState                 = mcCharge;
+                mcFocCtrl.State_Count   = Charge_Time;
+            }
+            #else
+            {               
+                if (GP42)
+                {
+                    PWMInputCapture();
+                    if((mcPwmInput.PwmDuty > 0) && (mcPwmInput.PwmDuty < _Q15(1.0)))
+                    {
+                        mcState                 = mcStart;                   
+                        TIM2__CNTR = 0;
+                    }
+                }
+                else 
+                {
+                    mcState                 = mcAlign;
+                    mcFocCtrl.State_Count   = Align_Time;                    //6832可以不需要预充电
+                }
+            }
+            #endif
+            break;
+            
+        case mcAlign:
+            Motor_Align();
+            EX0 = 0;
+            TIM2__CNTR          = 0;
+            #if (AlignTestMode == 1)
+            {
+                while (1);
+            }
+            #else
+            {
+                if (mcFocCtrl.State_Count == 0)
+                {
+                    mcFocCtrl.SpeedFlt  = 0;
+                    PWMInputCapture();
+                    mcPwmInput.PwmDuty = _Q15((float)mcPwmInput.TimeDR/mcPwmInput.TimeARR);
+                    PwmDutyFlt = mcPwmInput.PwmDuty / 32767.0;
+                    Angle = (PwmDutyFlt * 4098 - 1) / 4095 * 360.0;
+                    mcFocCtrl.LreanAngle = FOC__THETA + _Q15(Angle /360.0);
+                    mcFocCtrl.Lrean_State = 1;
+                    mcFocCtrl.SpeedFlt  = 0;
+                    mcState             = mcStart;
+                    TIM2__CNTR = 0;
+                    mcQEP.Cntr = 0;
+//                    Learn_Data[0] = mcFocCtrl.LreanAngle >> 8;
+//                    Learn_Data[1] = mcFocCtrl.LreanAngle;
+//                    EA = 0;
+//                    Flash_ErasePageRom(LEARNPAGEROMADDRESS);
+//                    
+//                    Flash_Sector_Write(LEARNPAGEROMADDRESS, Learn_Data[0]);
+//                    Flash_Sector_Write(LEARNPAGEROMADDRESS+1, Learn_Data[1]);
+//                    EA = 1;  
+                }
+            }
+            #endif
+            break;
+            
+        case mcStart:
+            Motor_Open();
+//            ClrBit(TIM3_CR1, T3EN);
+            break;
+            
+        case mcRun:
+            if (isCtrlPowerOn == false)
+            {
+                mcState = mcStop;
+            }
+            
+            break;
+            
+        case mcStop:
+            Motor_Stop();
+            break;
+            
+        case mcBrake:
+            if (mcFocCtrl.State_Count == 0)
+            {
+                mcState = mcReady;
+                MOE = 0;
+                ClrBit(DRV_CR, FOCEN);
+            }
+            
+            break;
+            
+        case mcFault:
+						if (mcFaultDect.CurrentFlag)
+						{
+							_nop_();
+						}
+						else 
+						{
+							FaultProcess();
+							_nop_();
+						}
+            break;
+            
+        default:
+            break;
+    }
+}

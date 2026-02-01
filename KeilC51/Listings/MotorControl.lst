@@ -1,0 +1,188 @@
+C51 COMPILER V9.52.0.0   MOTORCONTROL                                                      12/02/2025 15:24:47 PAGE 1   
+
+
+C51 COMPILER V9.52.0.0, COMPILATION OF MODULE MOTORCONTROL
+OBJECT MODULE PLACED IN .\Output\MotorControl.obj
+COMPILER INVOKED BY: E:\tools\keil4\C51\BIN\C51.EXE ..\User\source\Function\MotorControl.c LARGE OMF2 WARNINGLEVEL(0) BR
+                    -OWSE FLOATFUZZY(4) INCDIR(..\User\include;..\FU68xx_Haidware_Driver\Include) DEBUG PRINT(.\Listings\MotorControl.lst) TA
+                    -BS(2) OBJECT(.\Output\MotorControl.obj)
+
+line level    source
+
+   1          /* --------------------------- (C) COPYRIGHT 2020 Fortiortech ShenZhen -----------------------------
+   2              File Name      : MotorSpeed.c
+   3              Author         : Fortiortech  Appliction Team
+   4              Version        : V1.0
+   5              Date           : 2020-04-10
+   6              Description    : This file contains .C file function used for Motor Control.
+   7          ----------------------------------------------------------------------------------------------------
+   8                                                 All Rights Reserved
+   9          ------------------------------------------------------------------------------------------------- */
+  10          #include <MyProject.h>
+  11          /* Private variables ----------------------------------------------------------------------------*/
+  12          MotStaType mcState;
+  13          MotStaM    McStaSet;
+  14          float PwmDutyFlt;
+  15          float Angle;
+  16          
+  17          /* -------------------------------------------------------------------------------------------------
+  18              Function Name  : MC_Control
+  19              Description    : 电机控制状态机
+  20              Date           : 2020-04-10
+  21              Parameter      : None
+  22          ------------------------------------------------------------------------------------------------- */
+  23          extern uint8 AlignFlag;
+  24          
+  25          void MC_Control(void)
+  26          {
+  27   1          switch (mcState)
+  28   1          {
+  29   2              case mcReady:
+  30   2                  Motor_Ready();
+  31   2                  
+  32   2                  if (mcCurOffset.OffsetFlag == 1 && isCtrlPowerOn == true)
+  33   2                  {
+  34   3                      mcState                 = mcInit;
+  35   3                      mcCurOffset.OffsetFlag  = 0;
+  36   3                  }
+  37   2                  
+  38   2                  break;
+  39   2                  
+  40   2              case mcInit:
+  41   2                  Motor_Init();
+  42   2                  #if (IPMState == IPMtest)                           // 正常按电机状态机运行
+                          {
+                              mcState                 = mcCharge;
+                              mcFocCtrl.State_Count   = Charge_Time;
+                          }
+                          #else
+  48   2                  {               
+  49   3                      if (GP42)
+  50   3                      {
+  51   4                          PWMInputCapture();
+  52   4                          if((mcPwmInput.PwmDuty > 0) && (mcPwmInput.PwmDuty < _Q15(1.0)))
+  53   4                          {
+C51 COMPILER V9.52.0.0   MOTORCONTROL                                                      12/02/2025 15:24:47 PAGE 2   
+
+  54   5                              mcState                 = mcStart;                   
+  55   5                              TIM2__CNTR = 0;
+  56   5                          }
+  57   4                      }
+  58   3                      else 
+  59   3                      {
+  60   4                          mcState                 = mcAlign;
+  61   4                          mcFocCtrl.State_Count   = Align_Time;                    //6832可以不需要预充�
+             -�
+  62   4                      }
+  63   3                  }
+  64   2                  #endif
+  65   2                  break;
+  66   2                  
+  67   2              case mcAlign:
+  68   2                  Motor_Align();
+  69   2                  EX0 = 0;
+  70   2                  TIM2__CNTR          = 0;
+  71   2                  #if (AlignTestMode == 1)
+                          {
+                              while (1);
+                          }
+                          #else
+  76   2                  {
+  77   3                      if (mcFocCtrl.State_Count == 0)
+  78   3                      {
+  79   4                          mcFocCtrl.SpeedFlt  = 0;
+  80   4                          PWMInputCapture();
+  81   4                          mcPwmInput.PwmDuty = _Q15((float)mcPwmInput.TimeDR/mcPwmInput.TimeARR);
+  82   4                          PwmDutyFlt = mcPwmInput.PwmDuty / 32767.0;
+  83   4                          Angle = (PwmDutyFlt * 4098 - 1) / 4095 * 360.0;
+  84   4                          mcFocCtrl.LreanAngle = FOC__THETA + _Q15(Angle /360.0);
+  85   4                          mcFocCtrl.Lrean_State = 1;
+  86   4                          mcFocCtrl.SpeedFlt  = 0;
+  87   4                          mcState             = mcStart;
+  88   4                          TIM2__CNTR = 0;
+  89   4                          mcQEP.Cntr = 0;
+  90   4      //                    Learn_Data[0] = mcFocCtrl.LreanAngle >> 8;
+  91   4      //                    Learn_Data[1] = mcFocCtrl.LreanAngle;
+  92   4      //                    EA = 0;
+  93   4      //                    Flash_ErasePageRom(LEARNPAGEROMADDRESS);
+  94   4      //                    
+  95   4      //                    Flash_Sector_Write(LEARNPAGEROMADDRESS, Learn_Data[0]);
+  96   4      //                    Flash_Sector_Write(LEARNPAGEROMADDRESS+1, Learn_Data[1]);
+  97   4      //                    EA = 1;  
+  98   4                      }
+  99   3                  }
+ 100   2                  #endif
+ 101   2                  break;
+ 102   2                  
+ 103   2              case mcStart:
+ 104   2                  Motor_Open();
+ 105   2      //            ClrBit(TIM3_CR1, T3EN);
+ 106   2                  break;
+ 107   2                  
+ 108   2              case mcRun:
+ 109   2                  if (isCtrlPowerOn == false)
+ 110   2                  {
+ 111   3                      mcState = mcStop;
+ 112   3                  }
+ 113   2                  
+ 114   2                  break;
+C51 COMPILER V9.52.0.0   MOTORCONTROL                                                      12/02/2025 15:24:47 PAGE 3   
+
+ 115   2                  
+ 116   2              case mcStop:
+ 117   2                 // Motor_Stop();
+ 118   2                  if (isCtrlPowerOn == false)
+ 119   2                  {
+ 120   3                    MOE = 0;
+ 121   3                    _nop_();
+ 122   3                  }
+ 123   2                  else if (isCtrlPowerOn == true)
+ 124   2                  {
+ 125   3                      FaultProcess();
+ 126   3                  }
+ 127   2                  break;
+ 128   2                  
+ 129   2              case mcBrake:
+ 130   2                  if (mcFocCtrl.State_Count == 0)
+ 131   2                  {
+ 132   3                      mcState = mcReady;
+ 133   3                      MOE = 0;
+ 134   3                      ClrBit(DRV_CR, FOCEN);
+ 135   3                  }
+ 136   2                  
+ 137   2                  break;
+ 138   2                  
+ 139   2              case mcFault:
+ 140   2                  if (mcFaultDect.CurrentFlag)
+ 141   2                  {
+ 142   3                    _nop_();
+ 143   3                  }
+ 144   2                  else 
+ 145   2                  {
+ 146   3                    FaultProcess();
+ 147   3                    _nop_();
+ 148   3                  }
+ 149   2                  break;
+ 150   2                  
+ 151   2              default:
+ 152   2                  break;
+ 153   2          }
+ 154   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    536    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =     10    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

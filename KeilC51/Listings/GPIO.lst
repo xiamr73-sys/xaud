@@ -1,0 +1,85 @@
+C51 COMPILER V9.52.0.0   GPIO                                                              12/02/2025 15:24:49 PAGE 1   
+
+
+C51 COMPILER V9.52.0.0, COMPILATION OF MODULE GPIO
+OBJECT MODULE PLACED IN .\Output\GPIO.obj
+COMPILER INVOKED BY: E:\tools\keil4\C51\BIN\C51.EXE ..\User\source\Hardware\GPIO.c LARGE OMF2 WARNINGLEVEL(0) BROWSE FLO
+                    -ATFUZZY(4) INCDIR(..\User\include;..\FU68xx_Haidware_Driver\Include) DEBUG PRINT(.\Listings\GPIO.lst) TABS(2) OBJECT(.\O
+                    -utput\GPIO.obj)
+
+line level    source
+
+   1          /*  --------------------------- (C) COPYRIGHT 2020 Fortiortech ShenZhen -----------------------------
+   2              File Name      : GPIO.c
+   3              Author         : Fortiortech  Appliction Team
+   4              Version        : V1.0
+   5              Date           : 2020-04-11
+   6              Description    : This file contains .C file function used for Motor Control.
+   7              ----------------------------------------------------------------------------------------------------
+   8                                                 All Rights Reserved
+   9              ------------------------------------------------------------------------------------------------- */
+  10          #include "Myproject.h"
+  11          
+  12          
+  13          /*  -------------------------------------------------------------------------------------------------
+  14              Function Name : void GPIO_Init(void)
+  15              Description   : GPIO初始化配置,可将I/O口配置成输入或输出模式，上拉还是不上拉
+             -，模拟输出还是数字输出
+  16              Input         : 无
+  17              Output                :   无
+  18              -------------------------------------------------------------------------------------------------*/
+  19          
+  20          void GPIO_Init(void)
+  21          {
+  22   1          ClrBit(P0_OE, P01);
+  23   1          SetBit(P0_PU, P01);
+  24   1          
+  25   1          SetBit(P0_OE, P00);
+  26   1          SetBit(P0_PU, P00);
+  27   1          
+  28   1          ClrBit(P1_OE, P11);
+  29   1          SetBit(P1_PU, P11);
+  30   1        
+  31   1        SetBit(P1_OE, P12);
+  32   1          SetBit(P1_PU, P12);
+  33   1        GP12 = 0;
+  34   1          
+  35   1          /* HALL IO */    
+  36   1          SetBit(P4_OE, P44);
+  37   1          ClrBit(P4_PU, P44);
+  38   1          GP44 = 1;
+  39   1        
+  40   1          SetBit(P1_OE, P15);
+  41   1          SetBit(P1_PU, P15);
+  42   1          GP15 = 0;
+  43   1          
+  44   1          ClrBit(P4_OE, P42);
+  45   1          SetBit(P4_PU, P42);
+  46   1          
+  47   1          ClrBit(P3_OE, P37);
+  48   1          ClrBit(P3_PU, P37);
+  49   1          
+  50   1      //    SetBit(P0_OE, P05);
+  51   1      //    SetBit(P0_PU, P05);
+  52   1      }
+C51 COMPILER V9.52.0.0   GPIO                                                              12/02/2025 15:24:49 PAGE 2   
+
+  53          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =     79    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

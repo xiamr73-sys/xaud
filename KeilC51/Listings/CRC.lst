@@ -1,0 +1,70 @@
+C51 COMPILER V9.52.0.0   CRC                                                               12/02/2025 15:24:48 PAGE 1   
+
+
+C51 COMPILER V9.52.0.0, COMPILATION OF MODULE CRC
+OBJECT MODULE PLACED IN .\Output\CRC.obj
+COMPILER INVOKED BY: E:\tools\keil4\C51\BIN\C51.EXE ..\User\source\Hardware\CRC.c LARGE OMF2 WARNINGLEVEL(0) BROWSE FLOA
+                    -TFUZZY(4) INCDIR(..\User\include;..\FU68xx_Haidware_Driver\Include) DEBUG PRINT(.\Listings\CRC.lst) TABS(2) OBJECT(.\Out
+                    -put\CRC.obj)
+
+line level    source
+
+   1          /*  --------------------------- (C) COPYRIGHT 2020 Fortiortech ShenZhen -----------------------------
+   2              File Name      : CRC.c
+   3              Author         : Fortiortech  Appliction Team
+   4              Version        : V1.0
+   5              Date           : 2020-04-11
+   6              Description    : This file contains .C file function used for Motor Control.
+   7              ----------------------------------------------------------------------------------------------------
+   8                                                 All Rights Reserved
+   9              ------------------------------------------------------------------------------------------------- */
+  10          #include "Myproject.h"
+  11          
+  12          
+  13          /*  ----------------------------------------------------------------------------------------------*/
+  14          /*  Function Name  : CRC_Check
+  15              /*  Description    : CRC16_CCITT_FALSE  硬件实现
+  16              /*  Date           : 2020-09-06
+  17              /*  Parameter      : start_sector: [输入/出]
+  18          **           offset_sector: [输入/出]
+  19              /*  ----------------------------------------------------------------------------------------------*/
+  20          unsigned short CRC_Check(unsigned char start_sector, unsigned char offset_sector)
+  21          {
+  22   1          unsigned short crcresult = 0x0000;
+  23   1          unsigned short tempH = 0x00;
+  24   1          unsigned short tempL = 0x00;
+  25   1          SetBit(CRC_CR, CRCVAL);         //0-->0x0000  1-->0xffff
+  26   1          SetBit(CRC_CR, CRCDINI);        //1-->init success
+  27   1          CRC_BEG = start_sector;     //起始扇区
+  28   1          CRC_CNT = offset_sector;    //扇区偏移量   0-->1个扇区
+  29   1          //1个空扇区-->0x41E8     2个空扇区-->0x1634
+  30   1          //1个0xFF  -->0x5B2F    0x00~0xFF-->0x3FBD
+  31   1          SetBit(CRC_CR, AUTOINT);        //自动计算使能
+  32   1          /* ************************************************* */
+  33   1          SetBit(CRC_CR, CRCPNT);
+  34   1          tempH = CRC_DR;
+  35   1          ClrBit(CRC_CR, CRCPNT);
+  36   1          tempL = CRC_DR;
+  37   1          crcresult = (unsigned short)(tempH << 8) + tempL;
+  38   1          return crcresult;
+  39   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =     64    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----       1
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+C51 COMPILER V9.52.0.0   CRC                                                               12/02/2025 15:24:48 PAGE 2   
+
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

@@ -1,0 +1,213 @@
+C51 COMPILER V9.52.0.0   CMP                                                               12/02/2025 15:24:48 PAGE 1   
+
+
+C51 COMPILER V9.52.0.0, COMPILATION OF MODULE CMP
+OBJECT MODULE PLACED IN .\Output\CMP.obj
+COMPILER INVOKED BY: E:\tools\keil4\C51\BIN\C51.EXE ..\User\source\Hardware\CMP.c LARGE OMF2 WARNINGLEVEL(0) BROWSE FLOA
+                    -TFUZZY(4) INCDIR(..\User\include;..\FU68xx_Haidware_Driver\Include) DEBUG PRINT(.\Listings\CMP.lst) TABS(2) OBJECT(.\Out
+                    -put\CMP.obj)
+
+line level    source
+
+   1          /*  --------------------------- (C) COPYRIGHT 2020 Fortiortech ShenZhen -----------------------------
+   2              File Name      : CMP.c
+   3              Author         : Fortiortech  Appliction Team
+   4              Version        : V1.0
+   5              Date           : 2020-04-11
+   6              Description    : This file contains .C file function used for Motor Control.
+   7              ----------------------------------------------------------------------------------------------------
+   8                                                 All Rights Reserved
+   9              ------------------------------------------------------------------------------------------------- */
+  10          #include "MyProject.h"
+  11          
+  12          
+  13          
+  14          /*  ----------------------------------------------------------------------------------------------*/
+  15          /*  Function Name  : CMP0_Init
+  16              /*  Description    : CMP0初始化
+  17              /*  Date           : 2020-09-06
+  18              /*  Parameter      : None
+  19              /*  ----------------------------------------------------------------------------------------------*/
+  20          void CMP0_Init(void)
+  21          {
+  22   1          /* CMP0/1/2 端口模拟功能设置 */
+  23   1          SetBit(P1_AN, PIN4);    //CMP0 Pin设置为模拟模式  +
+  24   1          SetBit(P1_AN, PIN6);    //CMP1 Pin设置为模拟模式  +
+  25   1          SetBit(P2_AN, PIN1);    //CMP2 Pin设置为模拟模式  +
+  26   1          ClrBit(P1_PU, PIN4);    //P14上拉关闭
+  27   1          ClrBit(CMP_CR0, CMP2IM1); //CMP2中断模式
+  28   1          ClrBit(CMP_CR0, CMP2IM0); //00-->No Interrupt  01-->Rising  10-->Falling   11-->Rising/Falling
+  29   1          ClrBit(CMP_CR0, CMP1IM1); //CMP1中断模式
+  30   1          ClrBit(CMP_CR0, CMP1IM0); //00-->No Interrupt  01-->Rising  10-->Falling   11-->Rising/Falling
+  31   1          ClrBit(CMP_CR0, CMP0IM1); //CMP0中断模式
+  32   1          ClrBit(CMP_CR0, CMP0IM0); //00-->No Interrupt  01-->Rising  10-->Falling   11-->Rising/Falling
+  33   1          SetBit(CMP_CR1, CMP0HYS2); //CMP0迟滞电压配置
+  34   1          ClrBit(CMP_CR1, CMP0HYS1); //111-->±12mV   110-->+12mV   101-->-12mV   100-->±6mV
+  35   1          ClrBit(CMP_CR1, CMP0HYS0); //011-->+6mV    010-->-6mV    001-->±3mV    000-->No HYS
+  36   1          ClrBit(CMP_CR2, CMP0MOD1); //00-->无内置电阻3比较器             01-->有内置电阻3比较器
+             -模式
+  37   1          SetBit(CMP_CR2, CMP0MOD0); //10-->3差分比较器              11-->2比较器
+  38   1          ClrBit(CMP_CR2, CMP0SEL1); //00-->3比较器轮询              01-->P14+固定选择CMP0OUT
+  39   1          ClrBit(CMP_CR2, CMP0SEL0); //10-->P16+固定选择CMP1OUT       11-->P21+固定选择CMP2OUT
+  40   1          ClrBit(CMP_CR2, CMP0CSEL1); //00-->正常轮询（0.66us）     01-->快速轮询（0.33us）
+  41   1          ClrBit(CMP_CR2, CMP0CSEL0); //10-->低速轮询（2.67us）     11-->偏低速轮询（1.33us）
+  42   1          ClrBit(CMP_CR3, CMPSEL2);   //011-->P07作为CMP2输出
+  43   1          SetBit(CMP_CR3, CMPSEL1);   //010-->P07作为CMP1输出
+  44   1          SetBit(CMP_CR3, CMPSEL0);   //001-->P07作为CMP0输出
+  45   1          ClrBit(CMP_CR4, CMP0_FS);   //CMP1/2功能转移    仅CMP0_MOD=01时有效
+  46   1          SetBit(CMP_CR2, CMP0EN);    //CMP0 Enable
+  47   1          PCMP1 = 0;
+  48   1          PCMP0 = 0;
+  49   1          /* 比较器采样设置 */
+  50   1          CMP_SAMR = 0x42;    //延迟开启采样时间[7:4]&关闭采样时间[3:0]
+  51   1          //延迟时间= CSOND x 41.67 x 8ns CSOND 必须>= CSOFFD
+  52   1          SetBit(CMP_CR3, SAMSEL1);   //CMP0/1/2 & ADC 采样时机配置
+C51 COMPILER V9.52.0.0   CMP                                                               12/02/2025 15:24:48 PAGE 2   
+
+  53   1          ClrBit(CMP_CR3, SAMSEL0);   //00-->0N&0FF采样，无延迟   01-->0FF采样，延迟CMP_SAMR
+  54   1          //10-->0N采样，延迟CMP_SAMR    11-->0N&0FF采样，延迟CMP_SAMR
+  55   1          ClrBit(CMP_CR3, CMPDTEN);   //比较器死区采样使能 0-->Disable 1-->Enable
+  56   1          ClrBit(CMP_CR3, DBGSEL1);   //DEBUG信号选择-->输出至P01
+  57   1          SetBit(CMP_CR3, DBGSEL0);   //00-->Disable          01-->方波屏蔽续流结束和检测到过零点
+             -信号
+  58   1          //10-->ADC trigger信号    11-->比较器采样区间
+  59   1          /* ************************************************************** */
+  60   1      }
+  61          
+  62          /*  -------------------------------------------------------------------------------------------------
+  63              Function Name : void CMP3_Iint(void)
+  64              Description   : 比较器3初始化,用于硬件过流保护
+  65              Input         : 无
+  66              Output                :   无
+  67              -------------------------------------------------------------------------------------------------*/
+  68          
+  69          void CMP3_Init(void)
+  70          {
+  71   1          /******CMP3 端口模拟功能设置*******/
+  72   1          #if (Shunt_Resistor_Mode == Single_Resistor)
+                  {
+                      SetBit(P2_AN, P27);                           //CMP3 Pin设置为模拟模式  +
+                      ClrBit(CMP_CR1, CMP3MOD1);                    //00-->P27-单比较器模式    01-->P20/P23-双比
+             -较器模式
+                      ClrBit(CMP_CR1, CMP3MOD0);                    //1X-->P20/P23/P27-三比较器模式
+                  }
+                  #elif (Shunt_Resistor_Mode == Double_Resistor)
+  79   1          {
+  80   2              SetBit(P2_AN, P27);                           //CMP3 Pin设置为模拟模式  +
+  81   2              ClrBit(CMP_CR1, CMP3MOD1);                    //00-->P27-单比较器模式    01-->P20/P23-双比
+             -较器模式
+  82   2              ClrBit(CMP_CR1, CMP3MOD0);                    //1X-->P20/P23/P27-三比较器模式
+  83   2          }
+  84   1          #elif (Shunt_Resistor_Mode == Three_Resistor)
+                  {
+                      SetBit(P2_AN, P27 | P23 | P20);               //CMP3 Pin设置为模拟模式  +
+                      SetBit(CMP_CR1, CMP3MOD1);                    //00-->P27-单比较器模式    01-->P20/P23-双比
+             -较器模式
+                      ClrBit(CMP_CR1, CMP3MOD0);                    //1X-->P20/P23/P27-三比较器模式
+                  }
+                  #endif  //end Shunt_Resistor_Mode
+  91   1          #if (Compare_Mode == Compare_Hardware)
+                  {
+                      /**P2.6使能其模拟功能，使能数字输出**/
+                      SetBit(P2_AN, P26);
+                      ClrBit(P2_OE, P26);
+                      ClrBit(DAC_CR, DAC0_1EN);
+                  }
+                  #else
+  99   1          {
+ 100   2              /**P2.6使能其模拟功能，使能数字输出**/
+ 101   2              SetBit(P2_AN, P26);
+ 102   2              SetBit(P2_OE, P26);
+ 103   2              /******************************
+ 104   2                  0: 正常模式，DAC输出电压范围为0到VREF
+ 105   2                  1: 半电压转换模式，DAC输出电压范围为VHALF到VREF
+ 106   2              ****************************/
+ 107   2              ClrBit(DAC_CR, DACMOD);
+ 108   2          
+ 109   2              /**********设置DAC过流值*****************/
+ 110   2              if (DAC_OvercurrentValue % 2 == 0)
+C51 COMPILER V9.52.0.0   CMP                                                               12/02/2025 15:24:48 PAGE 3   
+
+ 111   2              {
+ 112   3                  ClrBit(DAC1_DR, DAC0_DR_0);
+ 113   3              }
+ 114   2              else
+ 115   2              {
+ 116   3                  SetBit(DAC1_DR, DAC0_DR_0);
+ 117   3              }
+ 118   2          
+ 119   2              DAC0_DR = DAC_OvercurrentValue;
+ 120   2              /**********DAC0 Enable******************/
+ 121   2              SetBit(DAC_CR, DAC0_1EN);
+ 122   2          }
+ 123   1          #endif                                               //end Compare_Mode
+ 124   1          SetBit(CMP_CR1, CMP3HYS);                            // CMP3 Hysteresis voltage Enable
+ 125   1          /*  ---------------------------------------------------------------------------------
+ 126   1              选择母线电流保护触发信号源，外部中断0或者比较器3中断。
+ 127   1              0-CMP3,1-INT0
+ 128   1              ---------------------------------------------------------------------------------*/
+ 129   1          ClrBit(EVT_FILT, EFSRC);
+ 130   1          /*  ---------------------------------------------------------------------------------
+ 131   1              触发硬件保护后硬件关闭驱动输出MOE配置
+ 132   1              00--MOE不自动清零
+ 133   1              01--MOE自动清零
+ 134   1              ----------------------------------------------------------------------------------*/
+ 135   1          ClrBit(EVT_FILT, MOEMD1);
+ 136   1          SetBit(EVT_FILT, MOEMD0);
+ 137   1          /*  ----------------------------------------------------------------------------------
+ 138   1              母线电流保护时间滤波宽度
+ 139   1              00-不滤波
+ 140   1              01-4cpu clock
+ 141   1              10-8cpu clock
+ 142   1              11-16cpu clock
+ 143   1              -----------------------------------------------------------------------------------*/
+ 144   1          SetBit(EVT_FILT, EFDIV1);
+ 145   1          SetBit(EVT_FILT, EFDIV0);
+ 146   1          SetBit(CMP_CR1, CMP3EN);    //CMP3 Enable
+ 147   1      }
+ 148          
+ 149          
+ 150          /*  ----------------------------------------------------------------------------------------------*/
+ 151          /*  Function Name  : CMP3_Interrupt_Init
+ 152              /*  Description    : CMP3中断配置
+ 153              /*  Date           : 2020-09-06
+ 154              /*  Parameter      : None
+ 155              /*  ----------------------------------------------------------------------------------------------*/
+ 156          void CMP3_Interrupt_Init(void)
+ 157          {
+ 158   1          ClrBit(CMP_SR, CMP3IF);
+ 159   1          /*  ------------------------------------------------------------------------
+ 160   1              比较器中断模式配置
+ 161   1              00: 不产生中断
+ 162   1              01: 上升沿产生中断
+ 163   1              10: 下降沿产生中断
+ 164   1              11: 上升/下降沿产生中断
+ 165   1              ------------------------------------------------------------------------ */
+ 166   1          ClrBit(CMP_CR0, CMP3IM1);
+ 167   1          SetBit(CMP_CR0, CMP3IM0);
+ 168   1          PCMP31 = 1;
+ 169   1          PCMP30 = 1;                 // 中断优先级别3
+ 170   1      }
+ 171          
+ 172          
+C51 COMPILER V9.52.0.0   CMP                                                               12/02/2025 15:24:48 PAGE 4   
+
+ 173          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    192    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

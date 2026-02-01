@@ -1,0 +1,93 @@
+C51 COMPILER V9.52.0.0   SPI                                                               12/02/2025 15:24:49 PAGE 1   
+
+
+C51 COMPILER V9.52.0.0, COMPILATION OF MODULE SPI
+OBJECT MODULE PLACED IN .\Output\SPI.obj
+COMPILER INVOKED BY: E:\tools\keil4\C51\BIN\C51.EXE ..\User\source\Hardware\SPI.c LARGE OMF2 WARNINGLEVEL(0) BROWSE FLOA
+                    -TFUZZY(4) INCDIR(..\User\include;..\FU68xx_Haidware_Driver\Include) DEBUG PRINT(.\Listings\SPI.lst) TABS(2) OBJECT(.\Out
+                    -put\SPI.obj)
+
+line level    source
+
+   1          /*  --------------------------- (C) COPYRIGHT 2020 Fortiortech ShenZhen -----------------------------
+   2              File Name      : SPI.c
+   3              Author         : Fortiortech  Appliction Team
+   4              Version        : V1.0
+   5              Date           : 2020-04-11
+   6              Description    : This file contains .C file function used for Motor Control.
+   7              ----------------------------------------------------------------------------------------------------
+   8                                                 All Rights Reserved
+   9              ------------------------------------------------------------------------------------------------- */
+  10          #include "Myproject.h"
+  11          
+  12          /*  -------------------------------------------------------------------------------------------------
+  13              Function Name : void SPI_Init(void)
+  14              Description   : SPI初始化配置
+  15              Input         : 输入说明（详细）
+  16              Output                :   输出说明（详细）
+  17          *****************************************************************************/
+  18          void SPI_Init(void)
+  19          {
+  20   1        ClrBit(SPI_CR1 , SPIEN);// 0,disable SPI;1 enable
+  21   1      
+  22   1      /*-------------------------------------------------------------------------------------------------
+  23   1        SPI管脚配置
+  24   1        1、禁止UART复用，P06配置为MISO，P05配置为MOSI
+  25   1        2、禁止比较器输出复用，P07配置为SCLK
+  26   1      -------------------------------------------------------------------------------------------------*/
+  27   1          ClrBit(PH_SEL , UART1EN);// 0,P06 as GPIO or SPI_MISO,P05 as GPIO or SPI_MOSI;1,P06 and p07 as USART
+  28   1          ClrBit(PH_SEL1 , SPICT); // 0:P05/P06 1:P00/P01
+  29   1      /*-------------------------------------------------------------------------------------------------
+  30   1        SPI时钟相位/极性配置
+  31   1        CPHA = 0, CPOL = 0:上升沿接收，下降沿发送，空闲电平为低
+  32   1        CPHA = 0, CPOL = 1:上升沿发送，下降沿接收，空闲电平为高
+  33   1        CPHA = 1, CPOL = 0:上升沿发送，下降沿接收，空闲电平为低
+  34   1        CPHA = 1, CPOL = 1:上升沿接收，下降沿发送，空闲电平为高
+  35   1      -------------------------------------------------------------------------------------------------*/
+  36   1        SetReg(SPI_CR0 , CPHA | CPOL , CPOL);
+  37   1      /*-------------------------------------------------------------------------------------------------
+  38   1        SPI从方式选择配置
+  39   1        00：3线从方式或3线主方式，NSS信号不连到端口管脚
+  40   1        01：4线从方式或4线多主方式，NSS配置为输入
+  41   1        1x：4线单主方式，NSS配置为输出，NSS信号输出x电平
+  42   1      -------------------------------------------------------------------------------------------------*/
+  43   1      //  SetReg(SPI_CR1 , NSSMOD0 | NSSMOD1 , NSSMOD0 | NSSMOD1);    //三线DBG模式
+  44   1          SetReg(SPI_CR1, NSSMOD0 | NSSMOD1, 0);
+  45   1      //    ClrBit(SPI_CR1,NSSMOD1);
+  46   1      //    SetBit(SPI_CR1,NSSMOD0);
+  47   1          SetBit(SPI_CR0 , SPIMS);                    // 0:Slave, 1:Master
+  48   1      
+  49   1      /*-------------------------------------------------------------------------------------------------
+  50   1        SPI中断配置
+  51   1        SPIF：SPI字节传输完成中断标志，硬件置位，软件清零
+  52   1        WCOL：SPI写冲突中断（发送缓冲器非空时写操作），硬件置位，软件清零
+  53   1        MODF：SPI方式错误中断（多主方式NSS被拉低，MSTEN和SPIEN被清零）硬件置位，软件�
+C51 COMPILER V9.52.0.0   SPI                                                               12/02/2025 15:24:49 PAGE 2   
+
+             -��零
+  54   1        RXOVRN：SPI接收溢出中断（SPI接收缓冲器接收溢出），硬件置位，软件清零
+  55   1      -------------------------------------------------------------------------------------------------*/
+  56   1          SetReg(SPI_CR1 , SPIIF|WCOL|MODF|RXOVRN , 0x00);// SPI所有中断清除
+  57   1          SPIIE = 0;                                  // SPI中断使能
+  58   1          SPI_CLK = 10;   // Fspi = Fcpu / (2*(SPI_CLK + 1)) = 6MHz
+  59   1          SetBit(SPI_CR1 , SPIEN);          // Enable SPI
+  60   1      }
+  61          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =     59    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

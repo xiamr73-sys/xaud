@@ -1,0 +1,9 @@
+ccxt
+ta
+python-dotenv
+loguru
+pandas
+numpy
+aiohttp
+jinja2
+aiohttp_jinja2

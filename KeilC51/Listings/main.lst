@@ -1,0 +1,306 @@
+C51 COMPILER V9.52.0.0   MAIN                                                              12/02/2025 15:24:47 PAGE 1   
+
+
+C51 COMPILER V9.52.0.0, COMPILATION OF MODULE MAIN
+OBJECT MODULE PLACED IN .\Output\main.obj
+COMPILER INVOKED BY: E:\tools\keil4\C51\BIN\C51.EXE ..\User\source\Application\main.c LARGE OMF2 WARNINGLEVEL(0) BROWSE 
+                    -FLOATFUZZY(4) INCDIR(..\User\include;..\FU68xx_Haidware_Driver\Include) DEBUG PRINT(.\Listings\main.lst) TABS(2) OBJECT(
+                    -.\Output\main.obj)
+
+line level    source
+
+   1          /*  --------------------------- (C) COPYRIGHT 2020 Fortiortech ShenZhen -----------------------------
+   2              File Name      : main.c
+   3              Author         : Fortiortech  Appliction Team
+   4              Version        : V1.0
+   5              Date           : 2020-04-10
+   6              Description    : This file contains .C file function used for Motor Control.
+   7              ----------------------------------------------------------------------------------------------------
+   8                                                 All Rights Reserved
+   9              ------------------------------------------------------------------------------------------------- */
+  10          /********************************************************************************
+  11              Header Definition
+  12          ********************************************************************************/
+  13          #include <MyProject.h>
+  14          
+  15          /********************************************************************************
+  16              Internal Routine Prototypes
+  17          ********************************************************************************/
+  18          void HardwareInit(void);
+  19          void SoftwareInit(void);
+  20          void VREFConfigInit(void);
+  21          uint8 SYST_Times;
+  22          /********************************************************************************
+  23              Macro & Structure Definition
+  24          ********************************************************************************/
+  25          
+  26          
+  27          
+  28          /********************************************************************************
+  29              Function Definition
+  30          ********************************************************************************/
+  31          /*  -------------------------------------------------------------------------------------------------
+  32                  Function Name : void DebugSet(void)
+  33                  Description   : 调试模式配置
+  34                  Input         : 无
+  35                  Output        : 无
+  36              -------------------------------------------------------------------------------------------------*/
+  37          typedef struct
+  38          {
+  39              uint8   Length;
+  40              uint8   CheckSum;
+  41              uint8   T_DATA[20];
+  42          } TypeDef_UartANO;
+  43          
+  44          void DebugSet(void)
+  45          {
+  46   1          #if (DBG_MODE == SPI_DBG_HW)        // 硬件调试模式
+                  {
+                      SPI_Init();
+                      Set_DBG_DMA(&HARD_SPIDATA);
+                  }
+                  #elif (DBG_MODE == SPI_DBG_SW)      // 软件调试模式
+  52   1          {
+  53   2              SPI_Init();
+C51 COMPILER V9.52.0.0   MAIN                                                              12/02/2025 15:24:47 PAGE 2   
+
+  54   2              Set_DBG_DMA(spidebug);
+  55   2          }
+  56   1          #elif (DBG_MODE == UART_DBG)        // UART调试模式
+                  {
+              //        UART2_Init();
+                      UART1_Init();
+                      SetPipe_DMA0(DRAM_UART2);
+                  }
+                  #endif
+  63   1      }
+  64          
+  65          
+  66          /*  -------------------------------------------------------------------------------------------------
+  67              Function Name  : HardwareInit
+  68              Description    : 硬件初始化，初始化需要使用的硬件设备配置，FOC必须配置的是�
+             -��放电压、运放初始化、ADC初始化、Driver初始化
+  69                              ，其他的可根据实际需求加。
+  70              Date           : 2020-04-12
+  71              Parameter      : None
+  72              ------------------------------------------------------------------------------------------------- */
+  73          void HardwareInit(void)
+  74          {
+  75   1          // 为提高芯片的抗干扰能力，降低芯片功耗，请在具体项目时，将不需要用的
+             -GPIO默认都配置为输入上拉。
+  76   1          // 具体配置可在GPIO_Default_Init设置。
+  77   1          // GPIO_Default_Init();
+  78   1          /*********硬件过流，比较器初始化，用于硬件过流比较保护*********/
+  79   1          CMP3_Init();
+  80   1          GPIO_Init();
+  81   1          EXTI_Init();
+  82   1          Driver_Init();
+  83   1          //  TIM1_HALL_Init();
+  84   1          Timer2_QEP_Init();
+  85   1          Timer3_Init();
+  86   1          VREFConfigInit();  /* ADC参考电压电压配置 */
+  87   1          ADC_Init();
+  88   1          AMP_Init();
+  89   1          /* -----比较器中断配置----- */
+  90   1          CMP3_Interrupt_Init();
+  91   1          //Timer4_Init();
+  92   1          /* -----SYSTICK定时器配置----- */
+  93   1          SYST_ARR = 12000;   //4000
+  94   1          //    SYST_Times  = MCU_CLOCK * (1000000 / 6000) / 1000;
+  95   1          SYST_Times  = MCU_CLOCK / (12000 / 1000.0);
+  96   1          SetBit(DRV_SR, SYSTIE);
+  97   1          //    ClrBit(P2_OE, P26);                       /* 0: Disable digital output */
+  98   1          //    ClrBit(P2_PU, P26);                       /* 0: Disable internal pull up */
+  99   1      }
+ 100          
+ 101          /*  -------------------------------------------------------------------------------------------------
+ 102              Function Name  : SoftwareInit
+ 103              Description    : 软件初始化，初始化所有定义变量，按键初始化扫描
+ 104              Date           : 2020-04-12
+ 105              Parameter      : None
+ 106              ------------------------------------------------------------------------------------------------- */
+ 107          void SoftwareInit(void)
+ 108          {
+ 109   1          MotorcontrolInit();
+ 110   1          PI_Init();
+ 111   1          mcState       = mcReady;
+ 112   1          mcFaultSource = 0;
+ 113   1      }
+C51 COMPILER V9.52.0.0   MAIN                                                              12/02/2025 15:24:47 PAGE 3   
+
+ 114          
+ 115          /*  -------------------------------------------------------------------------------------------------
+ 116              Function Name  : VREFConfigInit
+ 117              Description    : 配置VREF/VHALF输出
+ 118              Date           : 2020-04-12
+ 119              Parameter      : None
+ 120              ------------------------------------------------------------------------------------------------- */
+ 121          float Vofa_Data[7] = {0};
+ 122          TypeDef_UartANO     xdata UART_ANO;
+ 123          
+ 124          void Float2Char(float * DataTemp, uint8 * P, uint8 length) //适配Vofa上位机
+ 125          {
+ 126   1          unsigned char j  = 0;
+ 127   1          
+ 128   1          for (j = 0; j < length; j++)
+ 129   1          {
+ 130   2              P[(j << 2) + 3] = *((uint8 *)(DataTemp + j));
+ 131   2              P[(j << 2) + 2] = *((uint8 *)(DataTemp + j) + 1);
+ 132   2              P[(j << 2) + 1] = *((uint8 *)(DataTemp + j) + 2);
+ 133   2              P[(j << 2)] = *((uint8 *)(DataTemp + j) + 3);
+ 134   2          }
+ 135   1      }
+ 136          
+ 137          void Vofa_SendData(float * VofaData, uint8 length)
+ 138          {
+ 139   1          /*************发送数据*************************/
+ 140   1          memcpy(UART_ANO.T_DATA, (uint8 *)VofaData, ((length << 2))); //通过拷贝把数据重新整理 这�
+             -�要小端对齐
+ 141   1          Float2Char(VofaData, UART_ANO.T_DATA, length); //小端调整为大端
+ 142   1          UART_ANO.T_DATA[(length << 2)] = 0x00;          //写如结尾数据
+ 143   1          UART_ANO.T_DATA[(length << 2) + 1] = 0x00;
+ 144   1          UART_ANO.T_DATA[(length << 2) + 2] = 0x80;
+ 145   1          UART_ANO.T_DATA[(length << 2) + 3] = 0x7f;
+ 146   1      }
+ 147          
+ 148          void VREFConfigInit(void)
+ 149          {
+ 150   1          /* ***********************VREF&VHALF Config*********************** */
+ 151   1          ClrBit(P3_AN, PIN5);                         //VREF Voltage -->P35 Output 是否输出到P35引脚
+ 152   1          
+ 153   1          if (HW_ADC_REF == 3.0)
+ 154   1          {
+ 155   2              SetBit(VREF_VHALF_CR, VRVSEL1);             //00-->4.5V   01-->VDD5
+ 156   2              ClrBit(VREF_VHALF_CR, VRVSEL0);             //10-->3.0V   11-->4.0V
+ 157   2          }
+ 158   1          else if (HW_ADC_REF == 4.0)
+ 159   1          {
+ 160   2              SetBit(VREF_VHALF_CR, VRVSEL1);             //00-->4.5V   01-->VDD5
+ 161   2              SetBit(VREF_VHALF_CR, VRVSEL0);             //10-->3.0V   11-->4.0V
+ 162   2          }
+ 163   1          else if (HW_ADC_REF == 4.5)
+ 164   1          {
+ 165   2              ClrBit(VREF_VHALF_CR, VRVSEL1);             //00-->4.5V   01-->VDD5
+ 166   2              ClrBit(VREF_VHALF_CR, VRVSEL0);             //10-->3.0V   11-->4.0V
+ 167   2          }
+ 168   1          else
+ 169   1          {
+ 170   2              ClrBit(VREF_VHALF_CR, VRVSEL1);             //00-->4.5V   01-->VDD5
+ 171   2              SetBit(VREF_VHALF_CR, VRVSEL0);             //10-->3.0V   11-->4.0V
+ 172   2          }
+ 173   1          
+ 174   1          SetBit(VREF_VHALF_CR, VREFEN | VHALFEN);    //VREF_VHALF_CR = 0x11;
+C51 COMPILER V9.52.0.0   MAIN                                                              12/02/2025 15:24:47 PAGE 4   
+
+ 175   1      }
+ 176          
+ 177          void UART1_Init_Debuger(void)
+ 178          {
+ 179   1          SetBit(PH_SEL, UART1EN);    // P0[6]as UART2_RXD; P0[5]as UART2_TXD
+ 180   1          UT_MOD1 = 0;                // 8bit波特率可变UART模式
+ 181   1          UT_MOD0 = 1;
+ 182   1          SM2     = 0;                //
+ 183   1          REN     = 1;                // 使能接收
+ 184   1          ES0 = 0;                    // 发送/接受中断使能
+ 185   1          UT_BAUD = 0x000c;           // 9B-->9600 0x000c-->115200 0x0005-->256000 0x0006-->250000
+ 186   1      }
+ 187          
+ 188          //void DMA1_XRAMToUART_Init(uint16 Addr,uint8 Length)
+ 189          //{
+ 190          //    SetReg(DMA1_CR0, DMAEN | DMACFG2 | DMACFG1 | DMACFG0 | DMAIE, DMACFG0);
+ 191          //      DMA1_LEN = Length-1;                                // 设置DMA1发送数量为8
+ 192          //    DMA1_BA = Addr & 0x07ff;                            // 设置DMA1发送首地址
+ 193          //    Switch_DMA(1);                                      // 启动DMA1
+ 194          //}
+ 195          
+ 196          uint8 cnt = 0;
+ 197          void DMA1_XRAMToUART_Init(uint16 Addr, uint8 Length)
+ 198          {
+ 199   1          SetReg(DMA1_CR0, DMAEN | DMACFG2 | DMACFG1 | DMACFG0 | DMAIE, DMACFG2 | DMACFG1 | DMACFG0);
+ 200   1          DMA1_LEN = Length - 1;                              // 设置DMA1发送数量为8
+ 201   1          DMA1_BA = Addr & 0x07ff;                            // 设置DMA1发送首地址
+ 202   1          Switch_DMA(1);                                      // 启动DMA1
+ 203   1      }
+ 204          
+ 205          extern int32  PosErr;
+ 206          extern int32  speedRef;
+ 207          extern int32  speedErr;
+ 208          extern int16  t1;
+ 209          
+ 210          void main(void)
+ 211          {
+ 212   1          uint16 PowerUpCnt = 0;
+ 213   1          
+ 214   1          /*********上电等待*********/
+ 215   1          for (PowerUpCnt = 0; PowerUpCnt < SystemPowerUpTime; PowerUpCnt++);
+ 216   1          
+ 217   1          HardwareInit();  /* Hardware & Software Initial */
+ 218   1          SoftwareInit();
+ 219   1          DebugSet();
+ 220   1          #if (REF_MODE == UARTMODE)
+ 221   1          UART2_Init();
+ 222   1          SetPipe_DMA0(DRAM_UART2);
+ 223   1          #endif
+ 224   1          EA = 1;
+ 225   1          memset(&UqPo,0,sizeof(UQ_Posi));
+ 226   1          UqPo.UqPosiLockFlag = 1;//用dq电压锁轴的标志位，1表示可以锁轴，0表示已经锁轴了
+ 227   1          isCtrlPowerOn = true;
+ 228   1          Speed_Handle(0x79);
+ 229   1        //DMA1_XRAMToUART_Init(Uart.T_DATA, 20); //
+ 230   1          while (1)
+ 231   1          {
+ 232   2                  
+ 233   2              /* -----Current calibration----- */
+ 234   2              GetCurrentOffset();
+ 235   2              /* -----Motor Control State----- */
+ 236   2              MC_Control();
+C51 COMPILER V9.52.0.0   MAIN                                                              12/02/2025 15:24:47 PAGE 5   
+
+ 237   2              
+ 238   2      
+ 239   2              if (!Learn.FilishFlag)
+ 240   2              {
+ 241   3                  UartDealComm();
+ 242   3                  Self_Learning(); //Z信号自学习
+ 243   3              }
+ 244   2              
+ 245   2              if (Learn.State == LearnOver)
+ 246   2              {            
+ 247   3              UartDealComm2();
+ 248   3              }
+ 249   2               
+ 250   2            
+ 251   2      
+ 252   2              #if 0 //打开串口会影响上电动作
+                      if((mcQEP.g1msflg >= 10)&&(Learn.FilishFlag))
+                      {
+                        mcQEP.g1msflg = 0;
+                        Wait_DMA(1);
+                        Vofa_Data[0] = PosErr;
+                        Vofa_Data[1] = speedErr;//mcQEP.AbsSpeed ;//mcQEP.CntrSum;
+                        Vofa_Data[2] = FOC_IQREF ; //
+                        Vofa_Data[3] = mcQEP.SpeedMFlt;//mcQEP.Cntr&0X00FF;//
+                        Vofa_SendData(Vofa_Data, 4);
+                        Switch_DMA(1);
+                      }
+                      #endif
+ 265   2          }
+ 266   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    682    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =     52      12
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

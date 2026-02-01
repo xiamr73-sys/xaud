@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Binance 合约监控看板</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f8f9fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .card { border: none; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .card-header { background-color: #fff; border-bottom: 1px solid #eee; font-weight: 600; }
+        .log-box { height: 400px; overflow-y: scroll; background-color: #1e1e1e; color: #d4d4d4; padding: 15px; font-family: 'Consolas', 'Monaco', monospace; font-size: 0.9rem; border-radius: 4px; }
+        .alert-card { border-left: 5px solid #dc3545; transition: transform 0.2s; }
+        .alert-card:hover { transform: translateY(-2px); }
+        .score-badge { font-size: 1.2rem; font-weight: bold; }
+        .status-badge { font-size: 0.8rem; margin-right: 5px; }
+        .refresh-spin { animation: spin 1s linear infinite; }
+        /* 悬停报警卡片样式 */
+        .sticky-alert {
+            position: sticky;
+            top: 10px;
+            z-index: 1000;
+            border-left: 5px solid #ffc107 !important; /* 橙色边框区分 */
+            box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-dark mb-4">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1">🚀 Binance Futures Monitor</span>
+            <span class="text-light" id="last-update">等待更新...</span>
+        </div>
+    </nav>
+
+    <div class="container-fluid">
+        <div class="row">
+            <!-- 左侧：实时高分报警 -->
+            <div class="col-md-7">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>🚨 高分报警信号 (Live Alerts)</span>
+                        <div>
+                            <button class="btn btn-sm btn-outline-danger me-2" onclick="clearAlerts()">🗑️ 清除所有</button>
+                            <span class="badge bg-danger" id="alert-count">0</span>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="alerts-container">
+                            <div class="text-center text-muted p-5">暂无报警信号</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右侧：系统日志 + 回测结果 -->
+            <div class="col-md-5">
+                <!-- 回测结果卡片 -->
+                <div class="card mb-3">
+                    <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+                        <span>🧪 信号回测结果 (30m Backtest)</span>
+                        <span class="badge bg-light text-dark" id="backtest-count">0</span>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="log-box" id="backtest-container" style="height: 250px; background-color: #f0f8ff; color: #333;">
+                            <div class="text-center text-muted p-5">暂无回测数据 (需等待30分钟)</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        📝 系统运行日志 (System Logs)
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="log-box" id="log-container">
+                            <!-- 日志内容将通过 JS 插入 -->
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card mt-3">
+                    <div class="card-header">
+                        ℹ️ 监控状态
+                    </div>
+                    <div class="card-body">
+                        <ul class="list-group list-group-flush">
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                监控币种数量
+                                <span class="badge bg-primary rounded-pill">Top 200</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                K线周期
+                                <span class="badge bg-secondary rounded-pill">15m</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                报警阈值
+                                <span class="badge bg-warning text-dark rounded-pill">Score > 75</span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function updateData() {
+            fetch('/api/data')
+                .then(response => response.json())
+                .then(data => {
+                    // 更新时间
+                    const now = new Date();
+                    document.getElementById('last-update').innerText = '最后更新: ' + now.toLocaleTimeString();
+
+                    // 1. 更新日志
+                    const logContainer = document.getElementById('log-container');
+                    if (data.logs && data.logs.length > 0) {
+                        logContainer.innerHTML = data.logs.map(line => `<div>${line}</div>`).join('');
+                        logContainer.scrollTop = logContainer.scrollHeight; // 自动滚动到底部
+                    }
+
+                    // 3. 更新回测
+                    const backtestContainer = document.getElementById('backtest-container');
+                    const backtestCount = document.getElementById('backtest-count');
+                    
+                    if (data.backtests && data.backtests.length > 0) {
+                        backtestCount.innerText = data.backtests.length;
+                        // 倒序
+                        const btHtml = data.backtests.reverse().map(bt => {
+                            let content = bt.content
+                                .replace(/\n/g, '<br>')
+                                .replace(/期间最高涨幅: ([+\-]\d+\.\d+%)/, '期间最高涨幅: <span class="text-success fw-bold">$1</span>')
+                                .replace(/期间最大回撤: ([+\-]\d+\.\d+%)/, '期间最大回撤: <span class="text-danger fw-bold">$1</span>');
+                                
+                            return `
+                                <div class="border-bottom p-2 mb-1">
+                                    <small class="text-muted">${bt.time}</small>
+                                    <div style="font-size: 0.85rem;">${content}</div>
+                                </div>
+                            `;
+                        }).join('');
+                        backtestContainer.innerHTML = btHtml;
+                    } else {
+                        backtestCount.innerText = 0;
+                        backtestContainer.innerHTML = '<div class="text-center text-muted p-5">暂无回测数据 (需等待30分钟)</div>';
+                    }
+
+                    // 4. 更新报警
+                    const alertsContainer = document.getElementById('alerts-container');
+                    const alertCount = document.getElementById('alert-count');
+                    
+                    if (data.alerts && data.alerts.length > 0) {
+                        alertCount.innerText = data.alerts.length;
+                        
+                        let html = '';
+                        // 倒序展示，最新的在上面
+                        // 统计各币种出现次数
+                        const symbolCounts = {};
+                        // 记录每个币种首次出现时间
+                        const symbolFirstTime = {};
+                        
+                        // 正序遍历（从旧到新）以捕获最早时间
+                        // data.alerts 默认可能是从旧到新或从新到旧，取决于后端
+                        // 后端 parse_alerts 简单读取，通常是顺序的（旧 -> 新）
+                        // 让我们确认一下：alerts 是 append 进去的，所以索引 0 是最早的
+                        
+                        data.alerts.forEach(alert => {
+                            // 从内容中提取币种名称
+                            const match = alert.content.match(/【高分报警】\s+([A-Z0-9\/:]+)/);
+                            if (match) {
+                                const symbol = match[1];
+                                symbolCounts[symbol] = (symbolCounts[symbol] || 0) + 1;
+                                
+                                // 如果是第一次遇到，记录时间
+                                if (!symbolFirstTime[symbol]) {
+                                    symbolFirstTime[symbol] = alert.time;
+                                }
+                            }
+                        });
+
+                        data.alerts.reverse().forEach(alert => {
+                            // 检查是否是标准交易报警
+                            const isTradeAlert = alert.content.includes("【高分报警】");
+                            
+                            if (!isTradeAlert) {
+                                // 处理系统警告/错误 (如 BTC 急跌, API 错误)
+                                let alertClass = "alert-warning";
+                                let icon = "⚠️";
+                                if (alert.content.includes("ERROR") || alert.content.includes("失败")) {
+                                    alertClass = "alert-danger";
+                                    icon = "❌";
+                                }
+                                
+                                // 清理日志前缀
+                                let cleanContent = alert.content;
+                                if (cleanContent.includes(" - ")) {
+                                    cleanContent = cleanContent.split(" - ")[1];
+                                }
+                                
+                                html += `
+                                    <div class="alert ${alertClass} mb-3 shadow-sm">
+                                        <div class="d-flex justify-content-between">
+                                            <strong>${icon} 系统消息</strong>
+                                            <small>${alert.time}</small>
+                                        </div>
+                                        <div class="mt-1">${cleanContent}</div>
+                                    </div>
+                                `;
+                                return; // 跳过后续处理
+                            }
+
+                            // 简单的解析逻辑
+                            
+                            // 1. 提取币种名称
+                            let symbol = "UNKNOWN";
+                            const symbolMatch = alert.content.match(/【高分报警】\s+([A-Z0-9\/:]+)/);
+                            if (symbolMatch) symbol = symbolMatch[1];
+                            
+                            // 2. 提取评分
+                            let score = 0;
+                            const scoreMatch = alert.content.match(/Score:\s+(\d+)/);
+                            if (scoreMatch) score = parseInt(scoreMatch[1]);
+                            
+                            // 3. 提取价格
+                            let price = "N/A";
+                            const priceMatch = alert.content.match(/价格:\s+([\d.]+)/);
+                            if (priceMatch) price = priceMatch[1];
+
+                            // 4. 判断方向 (根据建议内容)
+                            let directionBadge = '<span class="badge bg-secondary">观察</span>';
+                            const isFundingNegative = alert.content.includes("资金费率: -");
+                            
+                            // OBV 趋势检查 (内容中是否包含 "OBV趋势确认")
+                            const isObvTrend = alert.content.includes("OBV趋势确认");
+                            
+                            if (isFundingNegative) {
+                                directionBadge = '<span class="badge bg-success">潜在做多 (费率<0)</span>';
+                            } else {
+                                directionBadge = '<span class="badge bg-warning text-dark">双向关注</span>';
+                            }
+                            
+                            // 如果满足 OBV 趋势，覆盖或追加高亮样式
+                            // 我们可以给整个卡片加一个特殊的边框颜色，或者在方向徽章旁加一个 OBV 徽章
+                            let obvBadge = "";
+                            if (isObvTrend) {
+                                obvBadge = '<span class="badge bg-warning text-dark ms-1">⚡ OBV确认</span>';
+                                // 也可以让卡片背景微微泛黄来高亮
+                            }
+
+                            // 5. 检查出现次数 & 首轮时间
+                            const count = symbolCounts[symbol] || 0;
+                            const firstTime = symbolFirstTime[symbol] || "N/A";
+                            
+                            // 简化时间显示，只取时分秒 (假设格式 YYYY-MM-DD HH:MM:SS...)
+                            const shortFirstTime = firstTime.split(' ').length > 1 ? firstTime.split(' ')[1].split('.')[0] : firstTime;
+                            
+                            let countBadge = `<span class="badge bg-light text-dark border" title="首轮报警: ${firstTime}">出现 ${count} 次 <small class="text-muted">(${shortFirstTime}起)</small></span>`;
+                            let stickyClass = "";
+                            
+                            if (count > 15) {
+                                countBadge = `<span class="badge bg-danger" title="首轮报警: ${firstTime}">🔥 频繁报警 (${count}次, ${shortFirstTime}起)</span>`;
+                                stickyClass = "sticky-alert"; // 触发悬停样式
+                            }
+                            
+                            // OBV 高亮样式增强：如果满足 OBV，给卡片加一个特殊的黄色边框样式 (如果不与 sticky 冲突)
+                            // 我们可以定义一个新的 class
+                            if (isObvTrend) {
+                                stickyClass += " border-warning"; // Bootstrap border color
+                                // 或者自定义样式
+                            }
+
+                            // 6. 格式化内容 (保留原有格式化，但精简头部)
+                            // 去掉第一行 "🚨 【高分报警】..." 因为我们已经在标题栏展示了
+                            let contentBody = alert.content.split('\n').slice(1).join('\n');
+                            
+                            let formattedContent = contentBody
+                                .replace(/\n/g, '<br>')
+                                .replace(/状态: (.*)/, '<strong>状态:</strong> $1')
+                                .replace(/\[做多建议\]/g, '<span class="badge bg-success">做多建议</span>')
+                                .replace(/\[做空建议\]/g, '<span class="badge bg-danger">做空建议</span>')
+                                .replace(/\(⚠️ 盈亏比不佳，谨慎入场\)/g, '<span class="text-warning fw-bold">⚠️ 盈亏比差</span>')
+                                .replace(/\[OBV趋势确认\]/g, '<span class="badge bg-warning text-dark">OBV趋势确认</span>'); // 高亮内容里的 OBV
+
+                            // 临时修复：处理 UNKNOWN 的问题
+                            // 如果币种是 UNKNOWN，尝试从第一行再次解析
+                            // 之前的逻辑是只看 match，可能 alert.content 第一行格式略有不同
+                            // 比如日志中是: 2026-02-02 ... | WARNING | ... - 🚨 【高分报警】 ...
+                            // 我们已经 split 掉了前缀，但可能 symbol 解析的正则太死板
+                            // 现在的日志格式: "🚨 【高分报警】 我踏马来了/USDT:USDT | Score: 80"
+                            // 正则 /【高分报警】\s+([A-Z0-9\/:]+)/ 可以匹配 "我踏马来了/USDT:USDT" 吗？
+                            // [A-Z0-9\/:] 不包含中文。
+                            // 修复正则以支持任意字符作为币种名称 (或者至少更宽泛)
+                            if (symbol === "UNKNOWN") {
+                                const retryMatch = alert.content.match(/【高分报警】\s+(.+?)\s+\|/);
+                                if (retryMatch) symbol = retryMatch[1];
+                            }
+
+                            html += `
+                                <div class="card alert-card mb-3 ${stickyClass}" ${isObvTrend ? 'style="background-color: #fffbf0;"' : ''}>
+                                    <div class="card-header d-flex justify-content-between align-items-center bg-white">
+                                        <div>
+                                            <span class="h5 mb-0 me-2">${symbol}</span>
+                                            ${directionBadge}
+                                            ${obvBadge}
+                                            ${countBadge}
+                                        </div>
+                                        <div>
+                                            <span class="badge bg-dark">Score: ${score}</span>
+                                            <small class="text-muted ms-2">${alert.time}</small>
+                                        </div>
+                                    </div>
+                                    <div class="card-body pt-2">
+                                        <div class="mb-2"><strong>当前价格:</strong> ${price}</div>
+                                        <div class="card-text text-secondary" style="font-size: 0.95rem;">${formattedContent}</div>
+                                    </div>
+                                </div>
+                            `;
+                        });
+                        alertsContainer.innerHTML = html;
+                    } else {
+                        alertCount.innerText = 0;
+                        alertsContainer.innerHTML = '<div class="text-center text-muted p-5">暂无报警信号</div>';
+                    }
+                })
+                .catch(err => console.error('Error fetching data:', err));
+        }
+
+        // 首次加载
+        updateData();
+        // 每 3 秒刷新一次
+        setInterval(updateData, 3000);
+
+        // 清除报警函数
+        function clearAlerts() {
+            if (!confirm('确定要清除所有历史报警记录吗？')) {
+                return;
+            }
+            
+            fetch('/api/clear_alerts', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'ok') {
+                        // 立即刷新数据
+                        updateData();
+                    } else {
+                        alert('清除失败: ' + data.message);
+                    }
+                })
+                .catch(err => console.error('Error clearing alerts:', err));
+        }
+    </script>
+</body>
+</html>

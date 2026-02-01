@@ -1,0 +1,24 @@
+".\Output\main.obj",
+".\Output\AddFunction.obj",
+".\Output\Interrupt.obj",
+".\Output\QEP.obj",
+".\Output\MotorControl.obj",
+".\Output\MotorControlFunction.obj",
+".\Output\MotorProtect.obj",
+".\Output\ADC.obj",
+".\Output\AMP.obj",
+".\Output\CMP.obj",
+".\Output\CRC.obj",
+".\Output\DMA.obj",
+".\Output\DRIVER.obj",
+".\Output\FLASH.obj",
+".\Output\GPIO.obj",
+".\Output\I2C.obj",
+".\Output\PIInit.obj",
+".\Output\SPI.obj",
+".\Output\TIMER.obj",
+".\Output\UART.obj",
+".\Output\STARTUP_FU6804.obj" 
+TO ".\Output\FOC_Fortior_FU6832" 
+
+PRINT(".\Listings\FOC_Fortior_FU6832.map") REMOVEUNUSED 

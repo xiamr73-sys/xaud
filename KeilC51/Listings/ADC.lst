@@ -1,0 +1,93 @@
+C51 COMPILER V9.52.0.0   ADC                                                               12/02/2025 15:24:48 PAGE 1   
+
+
+C51 COMPILER V9.52.0.0, COMPILATION OF MODULE ADC
+OBJECT MODULE PLACED IN .\Output\ADC.obj
+COMPILER INVOKED BY: E:\tools\keil4\C51\BIN\C51.EXE ..\User\source\Hardware\ADC.c LARGE OMF2 WARNINGLEVEL(0) BROWSE FLOA
+                    -TFUZZY(4) INCDIR(..\User\include;..\FU68xx_Haidware_Driver\Include) DEBUG PRINT(.\Listings\ADC.lst) TABS(2) OBJECT(.\Out
+                    -put\ADC.obj)
+
+line level    source
+
+   1          /*  --------------------------- (C) COPYRIGHT 2020 Fortiortech ShenZhen -----------------------------
+   2              File Name      : ADC.c
+   3              Author         : Fortiortech  Appliction Team
+   4              Version        : V1.0
+   5              Date           : 2020-04-11
+   6              Description    : This file contains .C file function used for Motor Control.
+   7              ----------------------------------------------------------------------------------------------------
+   8                                                 All Rights Reserved
+   9              ------------------------------------------------------------------------------------------------- */
+  10          #include "Myproject.h"
+  11          
+  12          
+  13          /*  -------------------------------------------------------------------------------------------------
+  14              Function Name : void ADC_Init(void)
+  15              Description   : ADC硬件设备初始化配置，使能ADC，通道配置，采样时间配置，中�
+             -�配置
+  16              Input         : 无
+  17              Output        : 无
+  18              -------------------------------------------------------------------------------------------------*/
+  19          
+  20          void ADC_Init(void)
+  21          {
+  22   1          /********************ADC 端口模拟功能设置************************/
+  23   1          SetBit(P2_AN, PIN0);    //AD0 P20 CH open--IU--固定
+  24   1          SetBit(P2_AN, PIN3);    //AD1 P23 CH open--IV--固定
+  25   1          
+  26   1          SetBit(P2_AN, PIN4);    //AD2 母线电压
+  27   1          
+  28   1          SetBit(P2_AN, PIN5);    //AD3 P25 CH open
+  29   1          SetBit(P2_AN, PIN7);    //AD4 P27 CH open--IBUS/IW--固定
+  30   1          
+  31   1          //  set_csr(P3_AN , PIN2);  //AD5 P32 CH open
+  32   1          //  set_csr(P3_AN , PIN3);  //AD6 P33 CH open
+  33   1            SetBit(P3_AN , PIN4);   //AD7 P34 CH open
+  34   1          //  set_csr(P2_AN , PIN1);  //AD8 P21 CH open
+  35   1          //  set_csr(P1_AN , PIN6);  //AD9 P16 CH open
+  36   1          //  set_csr(P1_AN , PIN4);  //AD10 P14 CH open
+  37   1          //  set_csr(P2_AN , PIN6);  //AD11 P26 CH open
+  38   1          //  set_csr(P1_AN , PIN3);  //AD12 P13 CH open
+  39   1          //  set_csr(P1_AN , PIN5);  //AD13 P15 CH open
+  40   1          
+  41   1          /****************************************************************/
+  42   1          SetBit(ADC_MASK, CH0EN | CH1EN | CH2EN| CH3EN | CH4EN |CH7EN | CH14EN);    //通道使能
+  43   1          
+  44   1          #if(VOLTAGE_MODE ==INTERNAL)
+  45   1          {
+  46   2              #if(VOLTAGE_SCALE ==Ratio_6_5)
+  47   2              {
+  48   3                  SetBit(ADC_CR, ADCRATIO);       //AD14采用1/6.5分压比
+  49   3              }
+  50   2              #else
+                      {
+                          ClrBit(ADC_CR, ADCRATIO);        //AD14采用1/12分压比
+C51 COMPILER V9.52.0.0   ADC                                                               12/02/2025 15:24:48 PAGE 2   
+
+                      }
+                      #endif
+  55   2          }
+  56   1          #endif
+  57   1      
+  58   1          SetBit(ADC_CR, ADCALIGN);       //ADC数据次高位对齐使能0-->Disable 1-->Enable
+  59   1          ClrBit(ADC_CR, ADCIE);          //ADC中断使能
+  60   1          SetBit(ADC_CR, ADCEN);          //Enable ADC0
+  61   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =     72    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
