@@ -6,8 +6,9 @@ import ccxt.async_support as ccxt
 import pandas as pd
 import numpy as np
 import requests
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, request
 from dotenv import load_dotenv
+import ai_analysis_service  # Import the new service
 
 # Load environment variables
 load_dotenv()
@@ -674,6 +675,40 @@ def alerts_page():
     response = app.make_response(render_template('alerts.html'))
     response.headers['Content-Type'] = 'text/html; charset=utf-8'
     return response
+
+@app.route('/ai-analysis')
+def ai_analysis_page():
+    # Force UTF-8 encoding for the response
+    response = app.make_response(render_template('ai_analysis.html'))
+    response.headers['Content-Type'] = 'text/html; charset=utf-8'
+    return response
+
+@app.route('/api/analyze', methods=['POST'])
+def analyze_crypto():
+    data = request.get_json()
+    symbol = data.get('symbol', 'BTC/USDT').strip().upper()
+    api_key = data.get('api_key')  # Get API Key from request
+    
+    # 1. Fetch Data
+    # Updated to fetch 2300 candles as requested for deeper analysis
+    df = ai_analysis_service.fetch_data_sync(symbol, limit=2300)
+    if df is None:
+        return jsonify({'success': False, 'message': f'Failed to fetch data for {symbol}'})
+        
+    # 2. Calculate Indicators
+    try:
+        df = ai_analysis_service.calculate_indicators(df)
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Indicator calculation error: {str(e)}'})
+        
+    # 3. AI Analysis
+    analysis_result = ai_analysis_service.get_ai_analysis(symbol, df, api_key=api_key)
+    
+    return jsonify({
+        'success': True, 
+        'symbol': symbol,
+        'analysis': analysis_result
+    })
 
 import math
 
