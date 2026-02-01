@@ -9,6 +9,7 @@ import requests
 from flask import Flask, render_template, jsonify, request
 from dotenv import load_dotenv
 import ai_analysis_service  # Import the new service
+import math
 
 # Load environment variables
 load_dotenv()
@@ -39,6 +40,11 @@ CACHE = {
     'seen_coins': set() # Store ALL coins seen in Top 10 to detect 'First Entry'
 }
 
+# --- Signal Backtest Storage ---
+# Structure: { 'symbol_timestamp': { 'symbol': 'BTCUSDT', 'type': 'LONG', 'entry_price': 50000, 'entry_time': 1700000000, 'oi_growth': 5.5 } }
+BACKTEST_SIGNALS = {} 
+BACKTEST_LOCK = threading.Lock()
+
 def send_discord_alert(content, webhook_url=None):
     # Default to General Webhook if not specified
     target_url = webhook_url or DISCORD_WEBHOOK_GENERAL
@@ -54,6 +60,98 @@ def send_discord_alert(content, webhook_url=None):
         print(f"Discord 推送成功 ({'General' if target_url == DISCORD_WEBHOOK_GENERAL else 'First Entry'})")
     except Exception as e:
         print(f"Discord 推送失败: {e}")
+
+# --- Backtest Verification Logic ---
+def check_backtest_results():
+    """
+    Periodically checks active backtest signals to see if 30 minutes have passed.
+    If so, verifies the result (max ROI) and logs it.
+    """
+    # Note: We need a sync exchange instance or run async in thread
+    # For simplicity, we'll use requests to get klines or a sync ccxt instance
+    # Using a new sync ccxt instance to avoid async loop conflicts
+    import ccxt as ccxt_sync
+    exchange = ccxt_sync.binance({'options': {'defaultType': 'future'}})
+    
+    while True:
+        try:
+            current_time = time.time()
+            signals_to_verify = []
+
+            with BACKTEST_LOCK:
+                # Find signals older than 30 minutes
+                keys_to_remove = []
+                for key, signal in BACKTEST_SIGNALS.items():
+                    if current_time - signal['entry_time'] >= 1800: # 30 minutes = 1800 seconds
+                        signals_to_verify.append(signal)
+                        keys_to_remove.append(key)
+                
+                # Remove from active list
+                for key in keys_to_remove:
+                    del BACKTEST_SIGNALS[key]
+            
+            if signals_to_verify:
+                print(f"🔍 Verifying {len(signals_to_verify)} backtest signals...")
+                
+                for signal in signals_to_verify:
+                    symbol = signal['symbol']
+                    entry_price = signal['entry_price']
+                    signal_type = signal['type']
+                    
+                    try:
+                        # Get 1m klines for the last 30 mins
+                        # 30 mins * 60 sec = 1800 sec
+                        # We need historical data from entry_time to entry_time + 30m
+                        # CCXT fetch_ohlcv supports since
+                        since_ts = int(signal['entry_time'] * 1000)
+                        klines = exchange.fetch_ohlcv(symbol, '1m', since=since_ts, limit=35)
+                        
+                        max_price = 0
+                        min_price = float('inf')
+                        
+                        for k in klines:
+                            # k: [time, open, high, low, close, vol]
+                            high = float(k[2])
+                            low = float(k[3])
+                            if high > max_price: max_price = high
+                            if low < min_price: min_price = low
+                            
+                        # Calculate ROI
+                        if signal_type == 'LONG':
+                            if max_price > 0:
+                                max_roi = ((max_price - entry_price) / entry_price) * 100
+                                result_emoji = "✅" if max_roi > 0.5 else "❌"
+                            else:
+                                max_roi = 0
+                                result_emoji = "❓"
+                        else: # SHORT
+                            if min_price < float('inf'):
+                                max_roi = ((entry_price - min_price) / entry_price) * 100
+                                result_emoji = "✅" if max_roi > 0.5 else "❌"
+                            else:
+                                max_roi = 0
+                                result_emoji = "❓"
+
+                        # Log result
+                        log_msg = (
+                            f"📉 **信号回测报告**\n"
+                            f"币种: {symbol} | 方向: {signal_type}\n"
+                            f"入场价: {entry_price} | OI增长: {signal['oi_growth']:.2f}%\n"
+                            f"30分钟内最大涨幅: {max_roi:.2f}% {result_emoji}"
+                        )
+                        print(f"Backtest Result: {symbol} {max_roi:.2f}%")
+                        send_discord_alert(log_msg, webhook_url=DISCORD_WEBHOOK_GENERAL)
+                        
+                    except Exception as e:
+                        print(f"Error verifying signal for {symbol}: {e}")
+                        
+        except Exception as e:
+            print(f"Backtest verification loop error: {e}")
+        
+        time.sleep(60) # Check every minute
+
+# Start background thread for backtest verification
+threading.Thread(target=check_backtest_results, daemon=True).start()
 
 def calculate_rsi(df, period=14):
     if len(df) < period + 1:
@@ -224,22 +322,6 @@ def analyze_trend(symbol, ohlcv_15m, ohlcv_1h=None):
     result['pre_breakout_base_score'] = score # To be added with OI score later
     
     # ATR Volatility Filter: Current Candle Range > 1.5 * ATR (or recent movement)
-    # The prompt says: "If current volatility < 1.5 * ATR, ignore."
-    # Usually we compare the current price movement range to ATR.
-    # Let's check if the current candle's range (High - Low) is significant, OR if the recent trend move is > 1.5 ATR.
-    # A common filter is checking if the breakout candle size is > ATR.
-    # Interpretation: "Ignore if market is sideways". Sideways usually means low ATR itself, or small candles relative to ATR.
-    # Let's assume we want to ensure the current move is "explosive" enough.
-    # Condition: Current Candle Body (abs(Close-Open)) > 0.5 * ATR (just to ensure it's not a doji)
-    # AND ATR itself is not super tiny (hard to define absolute).
-    # Re-reading prompt: "If current volatility < 1.5 * ATR".
-    # Maybe it means checking if the recent price change (e.g. over last few candles) is > 1.5 ATR.
-    # Let's use: (Close - EMA20) > 1.5 * ATR? No.
-    # Let's use: Bollinger Band Width?
-    # Let's implement a dynamic check: Ensure the current candle's High-Low > 0.8 * ATR to filter out noise candles.
-    # Or simply: Is the ADX filtering enough for "sideways"? The user specifically asked for ATR.
-    # Let's interpret "Volatility < 1.5 ATR" as "The range of recent motion is small".
-    # Implementation: Check if the last 3 candles' range (Max High - Min Low) > 1.5 * ATR.
     
     if len(df) >= 3:
         recent_high = df['high'].iloc[-3:].max()
@@ -249,17 +331,6 @@ def analyze_trend(symbol, ohlcv_15m, ohlcv_1h=None):
             result['atr_volatility'] = True
     
     # Order Flow Approximation
-    # "Volume spike driven by few large orders"
-    # We don't have tick data here, so we can't see individual orders.
-    # But we can look at "Volume / Count" if count (number of trades) is available.
-    # CCXT OHLCV doesn't usually give trade count.
-    # However, we can look at Volume vs Price Movement.
-    # Large Volume + Small Price Move = Absorption (Hidden Orders).
-    # Large Volume + Large Price Move = Aggressive Entry.
-    # Prompt: "If volume surge is driven by large orders... actual significance > scattered small orders."
-    # Without Level 2 data, we can proxy:
-    # If Volume > 3 * Vol_MA20 (Huge Volume Spike) AND Price Move is significant.
-    # Let's mark 'ORDER_FLOW' if Volume > 3 * Vol_MA20.
     if vol_multiplier > 3.0:
         result['order_flow_signal'] = True
 
@@ -288,27 +359,6 @@ def analyze_trend(symbol, ohlcv_15m, ohlcv_1h=None):
             result['poc_signal'] = True
             
     # Calculate Trend Score
-    # Formula: (ADX * 0.4) + (VolumeIncrease * 0.3) + (OI_Change * 0.3)
-    # Normalize Volume Increase: using vol_multiplier. Max expected ~5?
-    # Normalize OI Change: Percentage. Max expected ~5%?
-    # ADX: 0-100.
-    # Let's try to keep them on similar scales or just apply weights raw as requested.
-    # ADX is big (25-50+). VolMult is small (1-5). OI is small (0-5).
-    # If we sum raw: 50*0.4=20. 3*0.3=0.9. 1*0.3=0.3. ADX dominates completely.
-    # We should probably normalize or scale Vol/OI.
-    # User formula: "TrendScore = (ADX * 0.4) + (VolumeIncrease * 0.3) + (OI_Change * 0.3)"
-    # Usually implies variables are comparable or user implies weights for raw values?
-    # Let's assume user wants raw weights but we scale Vol/OI to be comparable to ADX (0-100 range).
-    # VolMult: 1.0 = normal. 3.0 = high. Let's multiply by 10? (3.0 -> 30).
-    # OI Change: 1% = normal. 5% = huge. Let's multiply by 10? (1% -> 10).
-    # Adjusted Formula: 0.4*ADX + 0.3*(VolMult*10) + 0.3*(OI_Change*10)
-    
-    # Use OI Change Absolute value? Or Directional?
-    # If trend is Long, Positive OI is good.
-    # If trend is Short, Positive OI is good (Shorts entering).
-    # So we want Positive OI Change (Increase in interest).
-    # If OI decreases, it's bad for trend strength.
-    
     oi_score = max(result['open_interest_change'], 0) * 10
     vol_score = result['vol_multiplier'] * 10
     
@@ -339,11 +389,6 @@ def analyze_trend(symbol, ohlcv_15m, ohlcv_1h=None):
         result['trend'] = 'NEUTRAL'
 
     # Calculate Dynamic ATR TP/SL (AFTER Trend is determined)
-    # User Request:
-    # SL = Entry - (N * ATR)  (Using N=2 for standard swing, or prompt said N * ATR)
-    # TP = Entry + (M * ATR)  (Using M=4 for 1:2 ratio or prompt M * ATR)
-    # Let's use N=2, M=4 for Longs (1:2 R:R roughly) as default unless specified.
-    # For Shorts: SL = Entry + (N * ATR), TP = Entry - (M * ATR)
     
     n_atr = 2.0
     m_atr = 4.0
@@ -363,38 +408,6 @@ def analyze_trend(symbol, ohlcv_15m, ohlcv_1h=None):
 
 async def fetch_candles(exchange, symbol, timeframe='15m', limit=100):
     try:
-        # Attempt to use Mark Price candles if possible to avoid wicks/noise
-        # CCXT binance supports 'markPrice' in fetch_ohlcv params? 
-        # Usually it's a separate endpoint or param.
-        # For Binance Futures: params={'price': 'mark'} works in some endpoints.
-        # Let's try standard fetch_ohlcv with params.
-        # If it fails, fallback to standard.
-        params = {}
-        # Binance futures specific: fetch mark price klines
-        # The endpoint is fapiPublicGetMarkPriceKlines
-        # CCXT unified: fetch_mark_ohlcv? Not standard.
-        # But we can pass params={'price': 'mark'} to fetch_ohlcv?
-        # Let's try to pass params={'price': 'mark'} which might be handled by ccxt binance impl.
-        # Actually, for binance futures, fetch_ohlcv uses fapiPublicGetKlines.
-        # Mark Price Klines is fapiPublicGetMarkPriceKlines.
-        # We can try to use a custom method or just stick to standard if too complex.
-        # But user specifically asked for Mark Price.
-        # Let's try:
-        # ohlcv = await exchange.fetch_ohlcv(symbol, timeframe, limit, params={'price': 'mark'}) 
-        # (This is speculative, need to check ccxt docs or try/except)
-        
-        # NOTE: CCXT Binance implementation often doesn't switch endpoint based on params for OHLCV easily.
-        # However, for simplicity and stability, we might stick to Index Price or Mark Price if easy.
-        # Let's try to just use standard for now but with a comment that we are 'attempting'
-        # or use a specific implicit method if available.
-        # Actually, let's just use standard candles for now as implementing custom API calls might be risky without testing.
-        # But wait, user said "Eliminate noise... use Mark Price".
-        # Let's try to pass params.
-        
-        # params = {'price': 'mark'} # This might not work directly in all ccxt versions.
-        # Let's stick to standard to ensure it runs, as "Mark Price" candles are not always standard in CCXT.
-        # But to respect the prompt, let's filter wicks manually? No, that's hard.
-        # Let's try to fetch standard candles.
         ohlcv = await exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
         return symbol, ohlcv
     except Exception as e:
@@ -409,7 +422,6 @@ async def fetch_open_interest_history(exchange, symbol):
 
 async def fetch_funding_rate(exchange, symbol):
     try:
-        # fetch_funding_rate returns current funding rate
         funding = await exchange.fetch_funding_rate(symbol)
         return symbol, funding
     except Exception as e:
@@ -540,14 +552,6 @@ async def update_data():
                     analysis['alert_count_yesterday'] = CACHE['alert_counts'].get('yesterday', {}).get(symbol, 0)
                     # Legacy field for alerts.html
                     analysis['alert_count'] = current_count 
-                    
-                    # Discord Alert for Pre-breakout - DISABLED as per user request (Only Strong Long/Short)
-                    # pb_last_sent = CACHE['discord_sent'].get(f"{symbol}_PB", 0)
-                    # if time.time() - pb_last_sent > 3600:
-                    #     reasons_str = ", ".join(reasons)
-                    #     pb_msg = f"⚠️ **PRE-BREAKOUT**: {symbol} | Score: {pb_score} | Reasons: {reasons_str}"
-                    #     send_discord_alert(pb_msg)
-                    #     CACHE['discord_sent'][f"{symbol}_PB"] = time.time()
                 else:
                     analysis['is_pre_breakout'] = False
 
@@ -562,13 +566,46 @@ async def update_data():
         CACHE['shorts'] = sorted(shorts, key=lambda x: x.get('trend_score', 0), reverse=True)[:3]
 
         # Sort by ADX (Descending) and Keep Top 3
-        CACHE['adx_longs'] = sorted(longs, key=lambda x: x.get('adx', 0), reverse=True)[:3]
-        CACHE['adx_shorts'] = sorted(shorts, key=lambda x: x.get('adx', 0), reverse=True)[:3]
+        longs_sorted = sorted(CACHE['longs'], key=lambda x: x.get('adx', 0), reverse=True)[:3]
+        shorts_sorted = sorted(CACHE['shorts'], key=lambda x: x.get('adx', 0), reverse=True)[:3]
+        
+        CACHE['adx_longs'] = longs_sorted
+        CACHE['adx_shorts'] = shorts_sorted
+
+        # --- BTC Trend Filter Logic ---
+        btc_trend = "NEUTRAL"
+        try:
+            # Fetch BTC 5m klines for trend analysis
+            btc_klines = await exchange.fetch_ohlcv('BTC/USDT', '5m', limit=20)
+            
+            if btc_klines:
+                btc_df = pd.DataFrame(btc_klines, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                
+                # Calculate Indicators
+                btc_adx = calculate_adx(btc_df, 14)
+                btc_df['ema_fast'] = btc_df['close'].ewm(span=9, adjust=False).mean()
+                btc_df['ema_slow'] = btc_df['close'].ewm(span=21, adjust=False).mean()
+                
+                current_adx = btc_adx.iloc[-1]
+                current_fast = btc_df['ema_fast'].iloc[-1]
+                current_slow = btc_df['ema_slow'].iloc[-1]
+                
+                # Define "Sharp Rise/Fall"
+                # Condition: High ADX (>25) AND Clear EMA Separation
+                if current_adx > 25:
+                    if current_fast > current_slow:
+                        btc_trend = "UP"
+                    elif current_fast < current_slow:
+                        btc_trend = "DOWN"
+                
+                print(f"BTC Trend: {btc_trend} (ADX: {current_adx:.2f})")
+            
+        except Exception as e:
+            print(f"Error analyzing BTC trend: {e}")
+        # ------------------------------
 
         # --- New Top 10 Entry Detection ---
-        # Combine top longs and shorts to form a "Top List" (let's say Top 10 by Trend Score overall)
         all_signals = longs + shorts
-        # Sort by Trend Score
         top_10_list = sorted(all_signals, key=lambda x: x.get('trend_score', 0), reverse=True)[:10]
         current_top_10_symbols = {item['symbol'] for item in top_10_list}
         
@@ -595,7 +632,6 @@ async def update_data():
                 # Send 'First Entry' Alert to Dedicated Channel
                 if first_entry_msg:
                     alert_content = "\n".join(first_entry_msg)
-                    # STRICT ROUTING: Use First Entry Webhook if available, otherwise General
                     if DISCORD_WEBHOOK_FIRST_ENTRY:
                         send_discord_alert(alert_content, webhook_url=DISCORD_WEBHOOK_FIRST_ENTRY)
                     else:
@@ -614,32 +650,96 @@ async def update_data():
         # --- Send Discord Summary Report ---
         discord_report = []
         
-        # 1. Top 3 Strong Longs (by Trend Score)
-        if CACHE['longs']:
-            discord_report.append("🚀 **Top 3 STRONG LONGs (Score)**")
-            for item in CACHE['longs']:
-                discord_report.append(f"• **{item['symbol']}** | Price: {item['close']} | Score: {item.get('trend_score', 0):.1f} | ADX: {item['adx']:.1f}")
+        # Process Longs (Only if BTC is NOT crashing)
+        if btc_trend != "DOWN":
+            for item in CACHE['longs']: # Use sorted Top 3 Longs
+                symbol = item['symbol']
+                # Track alert to prevent spamming (limit 1 per hour per coin)
+                last_sent = CACHE['discord_sent'].get(symbol, 0)
+                if time.time() - last_sent > 3600:
+                    icon = "🟢"
+                    discord_report.append(f"{icon} **{symbol}** | Price: {item['close']} | Score: {item.get('trend_score', 0):.1f}")
+                    CACHE['discord_sent'][symbol] = time.time()
+                    
+                    # --- Record for Backtest ---
+                    with BACKTEST_LOCK:
+                        signal_id = f"{symbol}_{int(time.time())}"
+                        BACKTEST_SIGNALS[signal_id] = {
+                            'symbol': symbol,
+                            'type': 'LONG',
+                            'entry_price': float(item['close']),
+                            'entry_time': time.time(),
+                            'oi_growth': float(item['open_interest_change'])
+                        }
+                    # ---------------------------
+        else:
+            print("BTC is dumping! Suppressing LONG alerts.")
+
+        # Process Shorts (Only if BTC is NOT mooning)
+        if btc_trend != "UP":
+            for item in CACHE['shorts']: # Use sorted Top 3 Shorts
+                symbol = item['symbol']
+                last_sent = CACHE['discord_sent'].get(symbol, 0)
+                if time.time() - last_sent > 3600:
+                    icon = "🔴"
+                    discord_report.append(f"{icon} **{symbol}** | Price: {item['close']} | Score: {item.get('trend_score', 0):.1f}")
+                    CACHE['discord_sent'][symbol] = time.time()
+
+                    # --- Record for Backtest ---
+                    with BACKTEST_LOCK:
+                        signal_id = f"{symbol}_{int(time.time())}"
+                        BACKTEST_SIGNALS[signal_id] = {
+                            'symbol': symbol,
+                            'type': 'SHORT',
+                            'entry_price': float(item['close']),
+                            'entry_time': time.time(),
+                            'oi_growth': float(item['open_interest_change'])
+                        }
+                    # ---------------------------
+        else:
+            print("BTC is pumping! Suppressing SHORT alerts.")
+
+        # Process High ADX Signals (Apply same BTC filter)
+        # We need to iterate over ADX lists
+        for item in CACHE['adx_longs']:
+            symbol = item['symbol']
+            if btc_trend == "DOWN": continue
+            
+            last_sent = CACHE['discord_sent'].get(symbol, 0)
+            if time.time() - last_sent > 3600:
+                icon = "🔥" 
+                discord_report.append(f"{icon} **{symbol}** (High ADX) | Trend: {item['trend']} | Price: {item['close']}")
+                CACHE['discord_sent'][symbol] = time.time()
+
+                with BACKTEST_LOCK:
+                    signal_id = f"{symbol}_{int(time.time())}"
+                    BACKTEST_SIGNALS[signal_id] = {
+                        'symbol': symbol,
+                        'type': 'LONG',
+                        'entry_price': float(item['close']),
+                        'entry_time': time.time(),
+                        'oi_growth': float(item['open_interest_change'])
+                    }
         
-        # 2. Top 3 Strong Shorts (by Trend Score)
-        if CACHE['shorts']:
-            prefix = "\n" if discord_report else ""
-            discord_report.append(f"{prefix}🔻 **Top 3 STRONG SHORTs (Score)**")
-            for item in CACHE['shorts']:
-                discord_report.append(f"• **{item['symbol']}** | Price: {item['close']} | Score: {item.get('trend_score', 0):.1f} | ADX: {item['adx']:.1f}")
+        for item in CACHE['adx_shorts']:
+            symbol = item['symbol']
+            if btc_trend == "UP": continue
+            
+            last_sent = CACHE['discord_sent'].get(symbol, 0)
+            if time.time() - last_sent > 3600:
+                icon = "❄️" 
+                discord_report.append(f"{icon} **{symbol}** (High ADX) | Trend: {item['trend']} | Price: {item['close']}")
+                CACHE['discord_sent'][symbol] = time.time()
 
-        # 3. Top 3 High ADX Longs
-        if CACHE['adx_longs']:
-            prefix = "\n" if discord_report else ""
-            discord_report.append(f"{prefix}🔥 **Top 3 High ADX LONGs**")
-            for item in CACHE['adx_longs']:
-                discord_report.append(f"• **{item['symbol']}** | Price: {item['close']} | ADX: {item['adx']:.1f}")
-
-        # 4. Top 3 High ADX Shorts
-        if CACHE['adx_shorts']:
-            prefix = "\n" if discord_report else ""
-            discord_report.append(f"{prefix}❄️ **Top 3 High ADX SHORTs**")
-            for item in CACHE['adx_shorts']:
-                discord_report.append(f"• **{item['symbol']}** | Price: {item['close']} | ADX: {item['adx']:.1f}")
+                with BACKTEST_LOCK:
+                    signal_id = f"{symbol}_{int(time.time())}"
+                    BACKTEST_SIGNALS[signal_id] = {
+                        'symbol': symbol,
+                        'type': 'SHORT',
+                        'entry_price': float(item['close']),
+                        'entry_time': time.time(),
+                        'oi_growth': float(item['open_interest_change'])
+                    }
                 
         # Only send if there are reports
         if discord_report:
@@ -709,8 +809,6 @@ def analyze_crypto():
         'symbol': symbol,
         'analysis': analysis_result
     })
-
-import math
 
 def clean_nan(obj):
     """
