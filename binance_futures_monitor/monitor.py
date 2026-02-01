@@ -25,16 +25,28 @@ async def send_discord_alert(content):
     发送 Discord 报警
     """
     if not DISCORD_WEBHOOK_URL:
+        print("⚠️ 警告: 未配置 DISCORD_WEBHOOK_URL，无法发送报警")
         return
         
     try:
+        # 打印调试信息 (Cloud Run 日志)
+        # print(f"正在发送 Discord 报警... URL: {DISCORD_WEBHOOK_URL[:30]}...") 
+        
         async with aiohttp.ClientSession() as session:
             payload = {"content": content}
             async with session.post(DISCORD_WEBHOOK_URL, json=payload) as response:
                 if response.status != 204:
-                    logger.error(f"Discord 推送失败: {response.status}")
+                    response_text = await response.text()
+                    error_msg = f"Discord 推送失败: Status={response.status}, Response={response_text}"
+                    print(f"❌ {error_msg}")
+                    logger.error(error_msg)
+                else:
+                    # print("✅ Discord 推送成功")
+                    pass
     except Exception as e:
-        logger.error(f"Discord 推送异常: {e}")
+        error_msg = f"Discord 推送异常: {str(e)}"
+        print(f"❌ {error_msg}")
+        logger.error(error_msg)
 
 async def verify_signal_performance(symbol, entry_price, score, signal_time_str):
     """

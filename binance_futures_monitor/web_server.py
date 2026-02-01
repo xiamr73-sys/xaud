@@ -192,17 +192,24 @@ async def test_discord(request):
     """API: 发送 Discord 测试消息"""
     webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
     if not webhook_url:
+        print("⚠️ 测试失败: 云端未配置 DISCORD_WEBHOOK_URL")
         return web.json_response({'status': 'error', 'message': '云端未配置 DISCORD_WEBHOOK_URL 环境变量'}, status=400)
 
     try:
+        print(f"🔄 正在测试 Discord 推送... URL前缀: {webhook_url[:30]}...")
         async with aiohttp.ClientSession() as session:
             payload = {"content": "✅ **Discord 连接测试成功**\n来自云端监控看板的手动测试。"}
             async with session.post(webhook_url, json=payload) as response:
                 if response.status == 204:
+                    print("✅ Discord 测试消息发送成功")
                     return web.json_response({'status': 'ok', 'message': '测试消息已发送，请检查 Discord 频道'})
                 else:
-                    return web.json_response({'status': 'error', 'message': f'发送失败，Discord 返回状态码: {response.status}'}, status=500)
+                    resp_text = await response.text()
+                    error_msg = f"发送失败，状态码: {response.status}, 响应: {resp_text}"
+                    print(f"❌ {error_msg}")
+                    return web.json_response({'status': 'error', 'message': error_msg}, status=500)
     except Exception as e:
+        print(f"❌ Discord 测试异常: {str(e)}")
         return web.json_response({'status': 'error', 'message': str(e)}, status=500)
 
 async def init_app():
