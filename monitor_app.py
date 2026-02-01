@@ -37,13 +37,16 @@ CACHE = {
 
 def send_discord_alert(content):
     if not DISCORD_WEBHOOK_URL:
+        print("错误: 未找到环境变量 DISCORD_WEBHOOK_URL")
         return
     
+    payload = {"content": content}
     try:
-        data = {"content": content}
-        requests.post(DISCORD_WEBHOOK_URL, json=data)
+        response = requests.post(DISCORD_WEBHOOK_URL, json=payload)
+        response.raise_for_status()
+        print("Discord 推送成功")
     except Exception as e:
-        print(f"Failed to send Discord alert: {e}")
+        print(f"Discord 推送失败: {e}")
 
 def calculate_rsi(df, period=14):
     if len(df) < period + 1:
