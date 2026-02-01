@@ -547,6 +547,10 @@ async def update_data():
                 elif analysis['trend'] == 'STRONG_SHORT':
                     shorts.append(analysis)
                 
+        # Sort by Trend Score (Descending) and Keep Top 3
+        CACHE['longs'] = sorted(longs, key=lambda x: x.get('trend_score', 0), reverse=True)[:3]
+        CACHE['shorts'] = sorted(shorts, key=lambda x: x.get('trend_score', 0), reverse=True)[:3]
+
         # Sort by ADX (Descending) and Keep Top 3
         CACHE['adx_longs'] = sorted(longs, key=lambda x: x.get('adx', 0), reverse=True)[:3]
         CACHE['adx_shorts'] = sorted(shorts, key=lambda x: x.get('adx', 0), reverse=True)[:3]
