@@ -529,15 +529,15 @@ async def update_data():
                     analysis['alert_count_today'] = current_count
                     analysis['alert_count_yesterday'] = CACHE['alert_counts'].get('yesterday', {}).get(symbol, 0)
                     # Legacy field for alerts.html
-                    analysis['alert_count'] = current_count
-
-                    # Discord Alert for Pre-breakout
-                    pb_last_sent = CACHE['discord_sent'].get(f"{symbol}_PB", 0)
-                    if time.time() - pb_last_sent > 3600:
-                        reasons_str = ", ".join(reasons)
-                        pb_msg = f"⚠️ **PRE-BREAKOUT**: {symbol} | Score: {pb_score} | Reasons: {reasons_str}"
-                        send_discord_alert(pb_msg)
-                        CACHE['discord_sent'][f"{symbol}_PB"] = time.time()
+                    analysis['alert_count'] = current_count 
+                    
+                    # Discord Alert for Pre-breakout - DISABLED as per user request (Only Strong Long/Short)
+                    # pb_last_sent = CACHE['discord_sent'].get(f"{symbol}_PB", 0)
+                    # if time.time() - pb_last_sent > 3600:
+                    #     reasons_str = ", ".join(reasons)
+                    #     pb_msg = f"⚠️ **PRE-BREAKOUT**: {symbol} | Score: {pb_score} | Reasons: {reasons_str}"
+                    #     send_discord_alert(pb_msg)
+                    #     CACHE['discord_sent'][f"{symbol}_PB"] = time.time()
                 else:
                     analysis['is_pre_breakout'] = False
 
@@ -550,6 +550,28 @@ async def update_data():
         # Sort by Trend Score (Descending) and Keep Top 3
         CACHE['longs'] = sorted(longs, key=lambda x: x.get('trend_score', 0), reverse=True)[:3]
         CACHE['shorts'] = sorted(shorts, key=lambda x: x.get('trend_score', 0), reverse=True)[:3]
+        
+        # --- Send Discord Summary Report ---
+        discord_report = []
+        
+        if CACHE['longs']:
+            discord_report.append("🚀 **Top 3 STRONG LONGs**")
+            for item in CACHE['longs']:
+                discord_report.append(f"• **{item['symbol']}** | Price: {item['close']} | Score: {item.get('trend_score', 0):.1f} | ADX: {item['adx']:.1f}")
+        
+        if CACHE['shorts']:
+            # Add newline if longs exist
+            prefix = "\n" if discord_report else ""
+            discord_report.append(f"{prefix}🔻 **Top 3 STRONG SHORTs**")
+            for item in CACHE['shorts']:
+                discord_report.append(f"• **{item['symbol']}** | Price: {item['close']} | Score: {item.get('trend_score', 0):.1f} | ADX: {item['adx']:.1f}")
+                
+        # Only send if there are Strong Longs or Shorts
+        if discord_report:
+            summary_msg = "\n".join(discord_report)
+            summary_msg = f"📊 **Market Update ({time.strftime('%H:%M:%S')})**\n{summary_msg}"
+            send_discord_alert(summary_msg)
+        # -----------------------------------
         
         # Sort by ADX (Descending) and Keep Top 3
         CACHE['adx_longs'] = sorted(longs, key=lambda x: x.get('adx', 0), reverse=True)[:3]
