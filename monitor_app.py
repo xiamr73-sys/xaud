@@ -577,14 +577,31 @@ async def update_data():
             
             if new_entries:
                 new_entry_msg = []
+                first_entry_msg = []
                 for symbol in new_entries:
                     # Find the item data
                     item = next((x for x in top_10_list if x['symbol'] == symbol), None)
                     if item:
                         signal_icon = "🟢" if item['trend'] == 'STRONG_LONG' else "🔴"
                         signal_text = "LONG" if item['trend'] == 'STRONG_LONG' else "SHORT"
-                        new_entry_msg.append(f"🚀 **新进榜单**: {symbol} | 信号: {signal_icon} {signal_text} | 价格: {item['close']}")
+                        
+                        if symbol not in CACHE['seen_coins']:
+                            CACHE['seen_coins'].add(symbol)
+                            first_entry_msg.append(f"✨ **发现新星**: {symbol} | 信号: {signal_icon} {signal_text} | 价格: {item['close']}")
+                        else:
+                            new_entry_msg.append(f"🚀 **新进榜单**: {symbol} | 信号: {signal_icon} {signal_text} | 价格: {item['close']}")
                 
+                # Send 'First Entry' Alert to Dedicated Channel
+                if first_entry_msg:
+                    alert_content = "\n".join(first_entry_msg)
+                    # STRICT ROUTING: Use First Entry Webhook if available, otherwise General
+                    if DISCORD_WEBHOOK_FIRST_ENTRY:
+                        send_discord_alert(alert_content, webhook_url=DISCORD_WEBHOOK_FIRST_ENTRY)
+                    else:
+                        print("Warning: First Entry Webhook not set, falling back to General")
+                        send_discord_alert(alert_content, webhook_url=DISCORD_WEBHOOK_GENERAL)
+
+                # Send Regular 'New Entry' Alert to General Channel
                 if new_entry_msg:
                     alert_content = "**🔔 Top 10 榜单变动**\n" + "\n".join(new_entry_msg)
                     send_discord_alert(alert_content)
