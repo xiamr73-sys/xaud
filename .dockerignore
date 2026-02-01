@@ -21,7 +21,6 @@ SERVERLESS_DEPLOY.md
 deploy_gcp.sh
 vercel.json
 *.log
-*.sh
 
 # Large files and folders
 *.zip
