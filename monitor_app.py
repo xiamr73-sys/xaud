@@ -62,92 +62,106 @@ def send_discord_alert(content, webhook_url=None):
         print(f"Discord 推送失败: {e}")
 
 # --- Backtest Verification Logic ---
-def check_backtest_results():
+def run_backtest_verification():
     """
-    Periodically checks active backtest signals to see if 30 minutes have passed.
-    If so, verifies the result (max ROI) and logs it.
+    Single iteration of backtest verification.
+    Returns list of results for debugging/logging.
     """
+    results = []
     # Note: We need a sync exchange instance or run async in thread
     # For simplicity, we'll use requests to get klines or a sync ccxt instance
-    # Using a new sync ccxt instance to avoid async loop conflicts
     import ccxt as ccxt_sync
     exchange = ccxt_sync.binance({'options': {'defaultType': 'future'}})
     
-    while True:
-        try:
-            current_time = time.time()
-            signals_to_verify = []
+    try:
+        current_time = time.time()
+        signals_to_verify = []
 
-            with BACKTEST_LOCK:
-                # Find signals older than 30 minutes
-                keys_to_remove = []
-                for key, signal in BACKTEST_SIGNALS.items():
-                    if current_time - signal['entry_time'] >= 1800: # 30 minutes = 1800 seconds
-                        signals_to_verify.append(signal)
-                        keys_to_remove.append(key)
-                
-                # Remove from active list
-                for key in keys_to_remove:
-                    del BACKTEST_SIGNALS[key]
+        with BACKTEST_LOCK:
+            # Find signals older than 30 minutes
+            keys_to_remove = []
+            for key, signal in BACKTEST_SIGNALS.items():
+                # Default 30 minutes (1800s), but can be shorter for testing if needed
+                if current_time - signal['entry_time'] >= 1800: 
+                    signals_to_verify.append(signal)
+                    keys_to_remove.append(key)
             
-            if signals_to_verify:
-                print(f"🔍 Verifying {len(signals_to_verify)} backtest signals...")
-                
-                for signal in signals_to_verify:
-                    symbol = signal['symbol']
-                    entry_price = signal['entry_price']
-                    signal_type = signal['type']
-                    
-                    try:
-                        # Get 1m klines for the last 30 mins
-                        # 30 mins * 60 sec = 1800 sec
-                        # We need historical data from entry_time to entry_time + 30m
-                        # CCXT fetch_ohlcv supports since
-                        since_ts = int(signal['entry_time'] * 1000)
-                        klines = exchange.fetch_ohlcv(symbol, '1m', since=since_ts, limit=35)
-                        
-                        max_price = 0
-                        min_price = float('inf')
-                        
-                        for k in klines:
-                            # k: [time, open, high, low, close, vol]
-                            high = float(k[2])
-                            low = float(k[3])
-                            if high > max_price: max_price = high
-                            if low < min_price: min_price = low
-                            
-                        # Calculate ROI
-                        if signal_type == 'LONG':
-                            if max_price > 0:
-                                max_roi = ((max_price - entry_price) / entry_price) * 100
-                                result_emoji = "✅" if max_roi > 0.5 else "❌"
-                            else:
-                                max_roi = 0
-                                result_emoji = "❓"
-                        else: # SHORT
-                            if min_price < float('inf'):
-                                max_roi = ((entry_price - min_price) / entry_price) * 100
-                                result_emoji = "✅" if max_roi > 0.5 else "❌"
-                            else:
-                                max_roi = 0
-                                result_emoji = "❓"
-
-                        # Log result
-                        log_msg = (
-                            f"📉 **信号回测报告**\n"
-                            f"币种: {symbol} | 方向: {signal_type}\n"
-                            f"入场价: {entry_price} | OI增长: {signal['oi_growth']:.2f}%\n"
-                            f"30分钟内最大涨幅: {max_roi:.2f}% {result_emoji}"
-                        )
-                        print(f"Backtest Result: {symbol} {max_roi:.2f}%")
-                        send_discord_alert(log_msg, webhook_url=DISCORD_WEBHOOK_GENERAL)
-                        
-                    except Exception as e:
-                        print(f"Error verifying signal for {symbol}: {e}")
-                        
-        except Exception as e:
-            print(f"Backtest verification loop error: {e}")
+            # Remove from active list
+            for key in keys_to_remove:
+                del BACKTEST_SIGNALS[key]
         
+        if signals_to_verify:
+            print(f"🔍 Verifying {len(signals_to_verify)} backtest signals...")
+            
+            for signal in signals_to_verify:
+                symbol = signal['symbol']
+                entry_price = signal['entry_price']
+                signal_type = signal['type']
+                
+                try:
+                    # Get 1m klines for the last 30 mins
+                    # 30 mins * 60 sec = 1800 sec
+                    # We need historical data from entry_time to entry_time + 30m
+                    since_ts = int(signal['entry_time'] * 1000)
+                    klines = exchange.fetch_ohlcv(symbol, '1m', since=since_ts, limit=35)
+                    
+                    if not klines:
+                        print(f"Warning: No klines found for {symbol} backtest")
+                        continue
+
+                    max_price = 0
+                    min_price = float('inf')
+                    
+                    for k in klines:
+                        # k: [time, open, high, low, close, vol]
+                        high = float(k[2])
+                        low = float(k[3])
+                        if high > max_price: max_price = high
+                        if low < min_price: min_price = low
+                        
+                    # Calculate ROI
+                    if signal_type == 'LONG':
+                        if max_price > 0:
+                            max_roi = ((max_price - entry_price) / entry_price) * 100
+                            result_emoji = "✅" if max_roi > 0.5 else "❌"
+                        else:
+                            max_roi = 0
+                            result_emoji = "❓"
+                    else: # SHORT
+                        if min_price < float('inf'):
+                            max_roi = ((entry_price - min_price) / entry_price) * 100
+                            result_emoji = "✅" if max_roi > 0.5 else "❌"
+                        else:
+                            max_roi = 0
+                            result_emoji = "❓"
+
+                    # Log result
+                    log_msg = (
+                        f"📉 **信号回测报告**\n"
+                        f"币种: {symbol} | 方向: {signal_type}\n"
+                        f"入场价: {entry_price} | OI增长: {signal['oi_growth']:.2f}%\n"
+                        f"30分钟内最大涨幅: {max_roi:.2f}% {result_emoji}"
+                    )
+                    print(f"Backtest Result: {symbol} {max_roi:.2f}%")
+                    send_discord_alert(log_msg, webhook_url=DISCORD_WEBHOOK_GENERAL)
+                    results.append(f"{symbol}: {max_roi:.2f}%")
+                    
+                except Exception as e:
+                    print(f"Error verifying signal for {symbol}: {e}")
+                    results.append(f"{symbol}: Error {e}")
+                    
+    except Exception as e:
+        print(f"Backtest verification loop error: {e}")
+        results.append(f"Loop Error: {e}")
+        
+    return results
+
+def check_backtest_results():
+    """
+    Periodically checks active backtest signals to see if 30 minutes have passed.
+    """
+    while True:
+        run_backtest_verification()
         time.sleep(60) # Check every minute
 
 # Start background thread for backtest verification
@@ -850,6 +864,36 @@ def test_first_entry():
     try:
         send_discord_alert(msg, webhook_url=DISCORD_WEBHOOK_FIRST_ENTRY)
         return jsonify({'status': 'success', 'message': 'Test alert sent to First Entry Webhook'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/test_backtest')
+def test_backtest():
+    """
+    Inject a fake signal from 30 minutes ago and trigger verification immediately.
+    """
+    try:
+        symbol = "BTC/USDT"
+        
+        # Inject fake signal
+        with BACKTEST_LOCK:
+            signal_id = f"TEST_{int(time.time())}"
+            BACKTEST_SIGNALS[signal_id] = {
+                'symbol': symbol,
+                'type': 'LONG',
+                'entry_price': 50000.0, # Dummy price, verification will use real history which might show massive ROI or loss
+                'entry_time': time.time() - 1805, # 30 mins + 5 sec ago
+                'oi_growth': 5.5
+            }
+        
+        # Run verification immediately
+        results = run_backtest_verification()
+        
+        return jsonify({
+            'status': 'success', 
+            'message': 'Backtest verification triggered manually',
+            'results': results
+        })
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 

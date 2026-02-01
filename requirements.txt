@@ -12,3 +12,4 @@ ta
 ccxt
 numpy
 requests
+flask

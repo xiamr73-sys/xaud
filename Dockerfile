@@ -9,13 +9,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# 复制并安装依赖 (仅复制 requirements.txt 以利用缓存)
-COPY binance_futures_monitor/requirements.txt .
+# 复制并安装依赖
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 复制项目代码
-COPY binance_futures_monitor ./binance_futures_monitor
-COPY start.sh .
+COPY . .
 
 # 设置权限
 RUN chmod +x start.sh
