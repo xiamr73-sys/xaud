@@ -1,7 +1,8 @@
 # 基础框架
-flask
-gunicorn
+aiohttp
+aiohttp_jinja2
 python-dotenv
+loguru
 
 # 加密货币与数据分析
 pandas
