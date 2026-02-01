@@ -32,7 +32,8 @@ CACHE = {
     },
     'discord_sent': {}, # Track last sent time for Discord alerts
     'last_updated': None,
-    'is_updating': False
+    'is_updating': False,
+    'last_top_10': set() # Store last Top 10 symbols to detect new entries
 }
 
 def send_discord_alert(content):
@@ -557,6 +558,35 @@ async def update_data():
         # Sort by ADX (Descending) and Keep Top 3
         CACHE['adx_longs'] = sorted(longs, key=lambda x: x.get('adx', 0), reverse=True)[:3]
         CACHE['adx_shorts'] = sorted(shorts, key=lambda x: x.get('adx', 0), reverse=True)[:3]
+
+        # --- New Top 10 Entry Detection ---
+        # Combine top longs and shorts to form a "Top List" (let's say Top 10 by Trend Score overall)
+        all_signals = longs + shorts
+        # Sort by Trend Score
+        top_10_list = sorted(all_signals, key=lambda x: x.get('trend_score', 0), reverse=True)[:10]
+        current_top_10_symbols = {item['symbol'] for item in top_10_list}
+        
+        # Check for new entries
+        if CACHE.get('last_top_10'): # Skip first run
+            new_entries = current_top_10_symbols - CACHE['last_top_10']
+            
+            if new_entries:
+                new_entry_msg = []
+                for symbol in new_entries:
+                    # Find the item data
+                    item = next((x for x in top_10_list if x['symbol'] == symbol), None)
+                    if item:
+                        signal_icon = "🟢" if item['trend'] == 'STRONG_LONG' else "🔴"
+                        signal_text = "LONG" if item['trend'] == 'STRONG_LONG' else "SHORT"
+                        new_entry_msg.append(f"🚀 **新进榜单**: {symbol} | 信号: {signal_icon} {signal_text} | 价格: {item['close']}")
+                
+                if new_entry_msg:
+                    alert_content = "**🔔 Top 10 榜单变动**\n" + "\n".join(new_entry_msg)
+                    send_discord_alert(alert_content)
+        
+        # Update Cache
+        CACHE['last_top_10'] = current_top_10_symbols
+        # -----------------------------------
 
         # --- Send Discord Summary Report ---
         discord_report = []
