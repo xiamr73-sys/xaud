@@ -716,6 +716,14 @@ if __name__ == '__main__':
     t.start()
     
     # Send startup notification
+    print(f"DEBUG: General Webhook configured: {bool(DISCORD_WEBHOOK_GENERAL)}")
+    if DISCORD_WEBHOOK_GENERAL:
+        print(f"DEBUG: General Webhook starts with: {DISCORD_WEBHOOK_GENERAL[:30]}...")
+    
+    print(f"DEBUG: First Entry Webhook configured: {bool(DISCORD_WEBHOOK_FIRST_ENTRY)}")
+    if DISCORD_WEBHOOK_FIRST_ENTRY:
+        print(f"DEBUG: First Entry Webhook starts with: {DISCORD_WEBHOOK_FIRST_ENTRY[:30]}...")
+
     if DISCORD_WEBHOOK_GENERAL:
         try:
             print("Sending startup notification to Discord...")
