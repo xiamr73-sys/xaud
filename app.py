@@ -108,8 +108,45 @@ def plot_stock_detail(symbol, name):
             st.error("无法获取该股票历史数据 (数据源连接失败)")
             return
 
-        df.columns = ['date', 'open', 'close', 'high', 'low', 'volume', 'amount', 'amplitude', 'pct_chg', 'change', 'turnover']
-        df['date'] = pd.to_datetime(df['date'])
+        # 标准化列名，适应不同接口返回的列数差异
+        # 东方财富接口通常返回 11 列，新浪接口返回 9-10 列
+        # 无论哪种，我们只需要核心的 date, open, close, high, low, volume
+        # 先尝试将 columns 赋值，如果失败（长度不匹配），则尝试自动推断
+        
+        expected_cols_11 = ['date', 'open', 'close', 'high', 'low', 'volume', 'amount', 'amplitude', 'pct_chg', 'change', 'turnover']
+        expected_cols_sina = ['date', 'open', 'high', 'low', 'close', 'volume', 'amount', 'turnover', 'pct_chg']
+        
+        try:
+            if len(df.columns) == 11:
+                df.columns = expected_cols_11
+            elif len(df.columns) >= 9:
+                # 尝试匹配新浪的格式 (注意新浪 high/low 顺序可能不同，这里假设 get_stock_data 已经处理过或者 akshare 返回顺序固定)
+                # 最好是依赖 get_stock_data 中已经统一好的列名，如果 get_stock_data 返回的是 dataframe，它应该有列名
+                # 如果 df 来自 get_stock_data，列名已经是英文的了，不需要重命名
+                if 'open' not in df.columns: 
+                    # 只有当列名不是英文时才重命名
+                    # 这是一个简单的 fallback，假设 9 列是新浪旧版
+                    df.columns = expected_cols_sina[:len(df.columns)]
+            else:
+                st.error(f"数据格式异常，列数: {len(df.columns)}")
+                return
+        except Exception as e:
+            # 如果重命名失败，打印一下当前的列名以便调试 (实际部署中看不到 print，所以尝试容错)
+            pass
+            
+        # 确保 date 是 datetime
+        if 'date' in df.columns:
+            df['date'] = pd.to_datetime(df['date'])
+        else:
+             # 尝试第一列作为日期
+             df.rename(columns={df.columns[0]: 'date'}, inplace=True)
+             df['date'] = pd.to_datetime(df['date'])
+             
+        # 确保其他列存在
+        required_cols = ['open', 'close', 'high', 'low', 'volume']
+        if not all(col in df.columns for col in required_cols):
+             st.error("数据缺失关键列 (Open/Close/High/Low)")
+             return
         
         # 计算均线
         df['ma5'] = df['close'].rolling(window=5).mean()
@@ -191,8 +228,27 @@ def plot_chanlun(symbol, name):
                 st.error("无法获取该股票历史数据 (数据源连接失败)")
                 return
 
-            df.columns = ['date', 'open', 'close', 'high', 'low', 'volume', 'amount', 'amplitude', 'pct_chg', 'change', 'turnover']
-            df['date'] = pd.to_datetime(df['date'])
+            # 标准化列名逻辑 (与 plot_stock_detail 保持一致，建议后续封装)
+            expected_cols_11 = ['date', 'open', 'close', 'high', 'low', 'volume', 'amount', 'amplitude', 'pct_chg', 'change', 'turnover']
+            expected_cols_sina = ['date', 'open', 'high', 'low', 'close', 'volume', 'amount', 'turnover', 'pct_chg']
+            
+            try:
+                if len(df.columns) == 11:
+                    df.columns = expected_cols_11
+                elif len(df.columns) >= 9:
+                    if 'open' not in df.columns: 
+                        df.columns = expected_cols_sina[:len(df.columns)]
+                else:
+                    st.error(f"数据格式异常，列数: {len(df.columns)}")
+                    return
+            except Exception:
+                pass
+                
+            if 'date' in df.columns:
+                df['date'] = pd.to_datetime(df['date'])
+            else:
+                 df.rename(columns={df.columns[0]: 'date'}, inplace=True)
+                 df['date'] = pd.to_datetime(df['date'])
             
             # 缠论计算
             cl = ChanlunSimple(df)
