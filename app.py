@@ -6,6 +6,8 @@ import datetime
 from tqdm import tqdm
 import time
 import concurrent.futures
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 # 设置页面配置
 st.set_page_config(
@@ -82,6 +84,84 @@ def process_stock(stock_info):
     except Exception:
         return None
     return None
+
+def plot_stock_detail(symbol, name):
+    """绘制K线图并标注止盈止损"""
+    try:
+        # 获取数据 (获取稍长一点的时间以计算均线)
+        end_date = datetime.datetime.now().strftime("%Y%m%d")
+        start_date = (datetime.datetime.now() - datetime.timedelta(days=365)).strftime("%Y%m%d")
+        
+        df = ak.stock_zh_a_hist(symbol=symbol, period="daily", start_date=start_date, end_date=end_date, adjust="qfq")
+        if df.empty:
+             # Fallback
+             df = get_stock_data(symbol)
+             
+        if df is None or df.empty:
+            st.error("无法获取该股票历史数据")
+            return
+
+        df.columns = ['date', 'open', 'close', 'high', 'low', 'volume', 'amount', 'amplitude', 'pct_chg', 'change', 'turnover']
+        df['date'] = pd.to_datetime(df['date'])
+        
+        # 计算均线
+        df['ma5'] = df['close'].rolling(window=5).mean()
+        df['ma10'] = df['close'].rolling(window=10).mean()
+        df['ma20'] = df['close'].rolling(window=20).mean()
+        
+        # 只展示最近 60 天，以免图表过于拥挤
+        plot_df = df.tail(60).copy()
+        
+        if plot_df.empty:
+            st.warning("数据不足，无法绘图")
+            return
+
+        # 止盈止损逻辑 (基于最新收盘价)
+        latest_close = plot_df.iloc[-1]['close']
+        stop_loss_price = latest_close * 0.95  # 止损 -5%
+        take_profit_price = latest_close * 1.10 # 止盈 +10%
+        
+        # 创建图表
+        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
+                            vertical_spacing=0.03, subplot_titles=(f'{name} ({symbol}) 日线', '成交量'), 
+                            row_width=[0.2, 0.7])
+
+        # K线图
+        fig.add_trace(go.Candlestick(
+            x=plot_df['date'],
+            open=plot_df['open'],
+            high=plot_df['high'],
+            low=plot_df['low'],
+            close=plot_df['close'],
+            name='K线'
+        ), row=1, col=1)
+
+        # 均线
+        fig.add_trace(go.Scatter(x=plot_df['date'], y=plot_df['ma5'], line=dict(color='black', width=1), name='MA5'), row=1, col=1)
+        fig.add_trace(go.Scatter(x=plot_df['date'], y=plot_df['ma10'], line=dict(color='orange', width=1), name='MA10'), row=1, col=1)
+        fig.add_trace(go.Scatter(x=plot_df['date'], y=plot_df['ma20'], line=dict(color='purple', width=1), name='MA20'), row=1, col=1)
+
+        # 止盈止损线 (虚线)
+        fig.add_hline(y=stop_loss_price, line_dash="dash", line_color="green", annotation_text=f"止损 (-5%): {stop_loss_price:.2f}", row=1, col=1)
+        fig.add_hline(y=take_profit_price, line_dash="dash", line_color="red", annotation_text=f"止盈 (+10%): {take_profit_price:.2f}", row=1, col=1)
+
+        # 成交量
+        fig.add_trace(go.Bar(x=plot_df['date'], y=plot_df['volume'], name='成交量'), row=2, col=1)
+
+        # 布局设置
+        fig.update_layout(
+            xaxis_rangeslider_visible=False,
+            height=600,
+            margin=dict(l=20, r=20, t=40, b=20)
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # 补充信息
+        st.caption(f"当前价格: {latest_close:.2f} | 建议止损: {stop_loss_price:.2f} | 建议止盈: {take_profit_price:.2f}")
+        
+    except Exception as e:
+        st.error(f"绘图失败: {e}")
 
 def run_scan(stock_list, progress_bar, status_text):
     results = []
@@ -341,13 +421,7 @@ if app_mode == "K线扫描":
         stock_list = None
         limit_msg = ""
         
-        # 检查网络连接 (简单检查)
-        # try:
-        #    get_stock_data("000001")
-        # except Exception as e:
-        #     st.error(f"无法连接到数据源...\n错误详情: {e}")
-        #     st.stop()
-        
+        # ... (list generation logic same as before)
         if selected_sector == "全市场 (前50只演示)":
             try:
                 stock_list = ak.stock_info_a_code_name().head(50)
@@ -371,7 +445,7 @@ if app_mode == "K线扫描":
                         stock_list = stocks
                         limit_msg = f" (板块: {real_name})"
                     else:
-                        st.error(real_name) # 这里 real_name 是错误信息
+                        st.error(real_name)
 
         if stock_list is not None:
             st.info(f"开始扫描 {len(stock_list)} 只股票{limit_msg}...")
@@ -386,19 +460,38 @@ if app_mode == "K线扫描":
             
             if not result_df.empty:
                 st.success(f"共发现 {len(result_df)} 只符合条件的股票")
-                st.dataframe(result_df, use_container_width=True)
-                
-                # 下载按钮
-                csv = result_df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    "下载结果 CSV",
-                    csv,
-                    "scan_results.csv",
-                    "text/csv",
-                    key='download-csv'
-                )
+                # 保存结果到 session_state
+                st.session_state['scan_results'] = result_df
             else:
                 st.warning("未找到符合条件的股票。")
+                st.session_state['scan_results'] = pd.DataFrame()
+
+    # 展示结果 (如果存在)
+    if 'scan_results' in st.session_state and not st.session_state['scan_results'].empty:
+        result_df = st.session_state['scan_results']
+        st.dataframe(result_df, use_container_width=True)
+        
+        # 下载按钮
+        csv = result_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            "下载结果 CSV",
+            csv,
+            "scan_results.csv",
+            "text/csv",
+            key='download-csv'
+        )
+        
+        st.markdown("---")
+        st.subheader("📊 详情分析 (止盈止损)")
+        
+        # 详情选择
+        stock_options = result_df.apply(lambda x: f"{x['代码']} {x['名称']}", axis=1).tolist()
+        selected_option = st.selectbox("点击下方列表选择要查看的股票:", ["请选择..."] + stock_options)
+        
+        if selected_option and selected_option != "请选择...":
+            code = selected_option.split(" ")[0]
+            name = selected_option.split(" ")[1]
+            plot_stock_detail(code, name)
 
 elif app_mode == "策略回测":
     st.header("🔙 策略回测")
