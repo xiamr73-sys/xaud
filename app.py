@@ -30,19 +30,20 @@ def process_stock(stock_info):
         # 半年前的日期 (180天)
         start_date = (datetime.datetime.now() - datetime.timedelta(days=180)).strftime("%Y%m%d")
         
-        # 尝试获取数据 (使用 start_date 和 end_date 优化)
-        # 注意：get_stock_data 需要修改以支持日期范围，或者在这里直接调用 akshare
-        # 为了兼容性，我们先尝试用 ak.stock_zh_a_hist 指定日期
+        fetch_start = time.time() # 计时开始
+        
+        # 尝试获取数据
         try:
             df = ak.stock_zh_a_hist(symbol=symbol, period="daily", start_date=start_date, end_date=end_date, adjust="qfq")
             if df.empty:
-                # Fallback to get_stock_data if empty (which tries full fetch or Sina)
                 df = get_stock_data(symbol)
             else:
                 df.columns = ['date', 'open', 'close', 'high', 'low', 'volume', 'amount', 'amplitude', 'pct_chg', 'change', 'turnover']
         except:
             df = get_stock_data(symbol)
             
+        fetch_time = time.time() - fetch_start # 计时结束
+        
         if df.empty or len(df) < 60:
             return None
             
@@ -71,8 +72,12 @@ def process_stock(stock_info):
                 '名称': name,
                 '最新价': latest['close'],
                 '日期': latest['date'],
-                '匹配模式': ", ".join(matched_patterns)
+                '匹配模式': ", ".join(matched_patterns),
+                '耗时': fetch_time # 返回耗时
             }
+        
+        # 即使没有匹配模式，如果是为了调试延迟，也可以考虑返回耗时（但在并发模式下不好统计）
+        # 这里我们只统计匹配到的或者抽样统计
             
     except Exception:
         return None
@@ -81,25 +86,23 @@ def process_stock(stock_info):
 def run_scan(stock_list, progress_bar, status_text):
     results = []
     total = len(stock_list)
-    
-    # 将 DataFrame 转换为 list of dict，方便传递给线程
     stocks_to_process = stock_list.to_dict('records')
-    
-    # 使用 ThreadPoolExecutor 进行并发处理
-    # 建议 max_workers 不要太大，以免触发反爬虫限制 (例如 5-10)
     max_workers = 5 
     
     completed = 0
+    total_fetch_time = 0
+    fetch_count = 0
+    
+    # 占位符用于显示实时指标
+    metrics_placeholder = st.empty()
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # 提交所有任务
         future_to_stock = {executor.submit(process_stock, stock): stock for stock in stocks_to_process}
         
         for future in concurrent.futures.as_completed(future_to_stock):
             stock = future_to_stock[future]
             completed += 1
             
-            # 更新进度
             progress = completed / total
             progress_bar.progress(progress)
             status_text.text(f"正在分析: {stock['code']} {stock['name']} ({completed}/{total})")
@@ -108,8 +111,13 @@ def run_scan(stock_list, progress_bar, status_text):
                 result = future.result()
                 if result:
                     results.append(result)
-            except Exception as exc:
-                # print(f'{stock["code"]} generated an exception: {exc}')
+                    if '耗时' in result:
+                        total_fetch_time += result['耗时']
+                        fetch_count += 1
+                        avg_time = total_fetch_time / fetch_count
+                        metrics_placeholder.caption(f"⚡️ 平均网络延迟: {avg_time:.2f}s / 股")
+                        
+            except Exception:
                 pass
             
     return pd.DataFrame(results)
