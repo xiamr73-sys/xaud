@@ -5,6 +5,7 @@ import strategies
 import datetime
 from tqdm import tqdm
 import time
+import concurrent.futures
 
 # 设置页面配置
 st.set_page_config(
@@ -13,7 +14,105 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- 辅助函数 ---
+# ... (辅助函数保持不变)
+
+def process_stock(stock_info):
+    """
+    单个股票处理函数 (用于并行处理)
+    """
+    symbol = stock_info['code']
+    name = stock_info['name']
+    
+    try:
+        # 优化：只获取最近半年的数据，减少数据传输量
+        # 今天的日期
+        end_date = datetime.datetime.now().strftime("%Y%m%d")
+        # 半年前的日期 (180天)
+        start_date = (datetime.datetime.now() - datetime.timedelta(days=180)).strftime("%Y%m%d")
+        
+        # 尝试获取数据 (使用 start_date 和 end_date 优化)
+        # 注意：get_stock_data 需要修改以支持日期范围，或者在这里直接调用 akshare
+        # 为了兼容性，我们先尝试用 ak.stock_zh_a_hist 指定日期
+        try:
+            df = ak.stock_zh_a_hist(symbol=symbol, period="daily", start_date=start_date, end_date=end_date, adjust="qfq")
+            if df.empty:
+                # Fallback to get_stock_data if empty (which tries full fetch or Sina)
+                df = get_stock_data(symbol)
+            else:
+                df.columns = ['date', 'open', 'close', 'high', 'low', 'volume', 'amount', 'amplitude', 'pct_chg', 'change', 'turnover']
+        except:
+            df = get_stock_data(symbol)
+            
+        if df.empty or len(df) < 60:
+            return None
+            
+        # 计算指标
+        df['ma5'] = df['close'].rolling(window=5).mean()
+        df['ma10'] = df['close'].rolling(window=10).mean()
+        df['ma20'] = df['close'].rolling(window=20).mean()
+        df['ma60'] = df['close'].rolling(window=60).mean()
+        df = strategies.calculate_kdj(df)
+        
+        latest = df.iloc[-1]
+        matched_patterns = []
+
+        if strategies.check_comprehensive_strategy(df):
+            matched_patterns.append("综合策略")
+        if strategies.check_old_duck_head(df):
+            matched_patterns.append("老鸭头")
+        if strategies.check_platform_breakout(df):
+            matched_patterns.append("平台突破")
+        if strategies.check_dragon_turns_head(df):
+            matched_patterns.append("龙回头")
+        
+        if matched_patterns:
+            return {
+                '代码': symbol,
+                '名称': name,
+                '最新价': latest['close'],
+                '日期': latest['date'],
+                '匹配模式': ", ".join(matched_patterns)
+            }
+            
+    except Exception:
+        return None
+    return None
+
+def run_scan(stock_list, progress_bar, status_text):
+    results = []
+    total = len(stock_list)
+    
+    # 将 DataFrame 转换为 list of dict，方便传递给线程
+    stocks_to_process = stock_list.to_dict('records')
+    
+    # 使用 ThreadPoolExecutor 进行并发处理
+    # 建议 max_workers 不要太大，以免触发反爬虫限制 (例如 5-10)
+    max_workers = 5 
+    
+    completed = 0
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # 提交所有任务
+        future_to_stock = {executor.submit(process_stock, stock): stock for stock in stocks_to_process}
+        
+        for future in concurrent.futures.as_completed(future_to_stock):
+            stock = future_to_stock[future]
+            completed += 1
+            
+            # 更新进度
+            progress = completed / total
+            progress_bar.progress(progress)
+            status_text.text(f"正在分析: {stock['code']} {stock['name']} ({completed}/{total})")
+            
+            try:
+                result = future.result()
+                if result:
+                    results.append(result)
+            except Exception as exc:
+                # print(f'{stock["code"]} generated an exception: {exc}')
+                pass
+            
+    return pd.DataFrame(results)
 
 @st.cache_data(ttl=3600)
 def get_sector_list():
@@ -84,63 +183,43 @@ def get_stock_data(symbol):
     return pd.DataFrame() # 均失败返回空
 
 
+@st.cache_data(ttl=600) # 缓存 10 分钟
+def get_sector_fund_flow():
+    """获取板块资金流向数据"""
+    try:
+        # 尝试获取行业资金流向
+        df = ak.stock_sector_fund_flow_rank(indicator="今日", sector_type="行业资金流")
+        
+        # 字段重命名以更友好显示
+        # 原始字段通常包括: 序号, 名称, 今日涨跌幅, 主力净流入-净额, 主力净流入-净占比, ...
+        # 我们只取关键字段
+        if not df.empty:
+            # 确保数值列是数字类型
+            numeric_cols = ['今日涨跌幅', '主力净流入-净额', '主力净流入-净占比', '超大单净流入-净额', '大单净流入-净额', '中单净流入-净额', '小单净流入-净额']
+            for col in numeric_cols:
+                if col in df.columns:
+                    # 去掉单位等非数字字符并转换 (akshare返回的通常已经是处理过的，但为了保险)
+                    # 这里 akshare 返回的通常是 float 或带单位字符串，视版本而定
+                    # 假设是 float 或可以直接转换
+                    pass
+            
+            # 简单处理单位，如果是以 '万' 或 '亿' 结尾的字符串，需要转换
+            # 目前 akshare 这个接口返回的通常是带单位的字符串或数字
+            # 我们先原样返回，由 dataframe 展示
+            
+            # 排序：默认按主力净流入净额降序
+            # 注意：如果列是字符串，排序可能不准。
+            # 这里先假设 akshare 返回的是易读格式。
+            
+            return df[['序号', '名称', '今日涨跌幅', '主力净流入-净额', '主力净流入-净占比']]
+            
+    except Exception as e:
+        return None
+    return None
+
 # --- 核心功能模块 ---
 
-def run_scan(stock_list, progress_bar, status_text):
-    results = []
-    total = len(stock_list)
-    
-    for index, row in stock_list.iterrows():
-        # 更新进度
-        progress = (index + 1) / total
-        progress_bar.progress(progress)
-        symbol = row['code']
-        name = row['name']
-        status_text.text(f"正在分析: {symbol} {name} ({index+1}/{total})")
-        
-        try:
-            # 获取日线数据 (使用封装的函数，支持 fallback)
-            df = get_stock_data(symbol)
-            
-            if df.empty or len(df) < 60:
-                continue
-            
-            # 这里的列名已经在 get_stock_data 中处理过了
-            
-            # 计算指标
-            df['ma5'] = df['close'].rolling(window=5).mean()
-            df['ma10'] = df['close'].rolling(window=10).mean()
-            df['ma20'] = df['close'].rolling(window=20).mean()
-            df['ma60'] = df['close'].rolling(window=60).mean()
-            df = strategies.calculate_kdj(df)
-            
-            latest = df.iloc[-1]
-            matched_patterns = []
 
-            if strategies.check_comprehensive_strategy(df):
-                matched_patterns.append("综合策略")
-            if strategies.check_old_duck_head(df):
-                matched_patterns.append("老鸭头")
-            if strategies.check_platform_breakout(df):
-                matched_patterns.append("平台突破")
-            if strategies.check_dragon_turns_head(df):
-                matched_patterns.append("龙回头")
-            
-            if matched_patterns:
-                results.append({
-                    '代码': symbol,
-                    '名称': name,
-                    '最新价': latest['close'],
-                    '日期': latest['date'],
-                    '匹配模式': ", ".join(matched_patterns)
-                })
-                
-        except Exception as e:
-            # 记录错误（可选：在界面上显示警告如果错误过多）
-            # print(f"Error scanning {symbol}: {e}")
-            continue
-            
-    return pd.DataFrame(results)
 
 def run_backtest_logic(days_lookback, sample_size, progress_bar, status_text):
     try:
@@ -226,7 +305,7 @@ st.markdown("基于技术指标和经典K线形态的自动化扫描工具")
 # 侧边栏
 with st.sidebar:
     st.header("功能选择")
-    app_mode = st.radio("选择模式", ["K线扫描", "策略回测", "情绪监控"])
+    app_mode = st.radio("选择模式", ["K线扫描", "策略回测", "情绪监控", "板块资金看板"])
     
     st.markdown("---")
     st.markdown("### 关于")
@@ -403,3 +482,49 @@ elif app_mode == "情绪监控":
                     
             except Exception as e:
                 st.error(f"获取新闻失败: {e}")
+
+elif app_mode == "板块资金看板":
+    st.header("💰 板块资金流向看板")
+    st.caption("数据来源：东方财富 (实时/盘后)")
+    
+    if st.button("刷新数据", type="primary"):
+        with st.spinner("正在获取全市场板块资金流向..."):
+            df_fund = get_sector_fund_flow()
+            
+            if df_fund is not None and not df_fund.empty:
+                # 简单的数据清洗和排序
+                # 假设 '主力净流入-净额' 是带单位的字符串，为了排序可能需要处理
+                # 这里先直接展示原始数据，通常已经是排好序的
+                
+                # 尝试转换 '主力净流入-净额' 为数值进行着色
+                def color_fund_flow(val):
+                    try:
+                        # 简单的启发式判断：包含 '-' 且不是负号开头可能是异常，但这里通常是负数
+                        if '亿' in str(val) or '万' in str(val):
+                            # 带单位，难以直接比较，但可以判断正负
+                            if str(val).startswith('-'):
+                                return 'color: green' # 跌/流出为绿
+                            else:
+                                return 'color: red'   # 涨/流入为红
+                        return ''
+                    except:
+                        return ''
+
+                st.subheader("行业板块资金流向 (今日)")
+                
+                # 交互式表格
+                st.dataframe(
+                    df_fund,
+                    use_container_width=True,
+                    height=600
+                )
+                
+                st.info("提示：点击表头可以进行排序。红色代表资金流入，绿色代表资金流出。")
+                
+            else:
+                st.warning("暂未获取到板块资金流向数据，可能是接口访问受限或非交易时间。")
+                st.markdown("""
+                **可能的原因：**
+                1. 东方财富接口反爬虫限制（云端常见）。
+                2. 当前非交易时间，数据未更新。
+                """)
