@@ -1,260 +1,405 @@
-import matplotlib.cm
-import matplotlib.pyplot as plt
+import streamlit as st
+import akshare as ak
+import pandas as pd
+import strategies
+import datetime
+from tqdm import tqdm
+import time
 
-# Patch matplotlib for pyleecan compatibility (matplotlib >= 3.9)
-if not hasattr(matplotlib.cm, 'register_cmap'):
-    import matplotlib
-    def register_cmap(name=None, cmap=None, override_builtin=False):
-        if name is None:
-            name = cmap.name
-        try:
-            matplotlib.colormaps.register(cmap, name=name, force=override_builtin)
-        except (ValueError, TypeError):
-            pass
-    matplotlib.cm.register_cmap = register_cmap
-
-if not hasattr(matplotlib.cm, 'get_cmap'):
-    import matplotlib
-    def get_cmap(name=None, lut=None):
-        return matplotlib.colormaps[name] if name else matplotlib.colormaps['viridis']
-    matplotlib.cm.get_cmap = get_cmap
-
-from flask import Flask, render_template, request, jsonify
-from sim import simulate_bldc
-from design import (
-    propose_slot_pole,
-    generate_dxf,
-    flux_map,
-    cogging_torque_estimate,
-    efficiency_estimate,
-    create_pyleecan_machine,
-    pyleecan_plot,
-    optimize_slot_pole,
-    constraint_checks,
-    assemble_zip,
-    efficiency_with_material,
-    ga_optimize,
+# 设置页面配置
+st.set_page_config(
+    page_title="A股 智能选股助手",
+    page_icon="📈",
+    layout="wide"
 )
-import matplotlib
-import matplotlib.cm as cm
-if not hasattr(cm, "register_cmap"):
-    def _register_cmap(cmap=None, name=None, colors=None, data=None, lut=None, **kwargs):
-        try:
-            if cmap is not None:
-                matplotlib.colormaps.register(cmap)
-            elif data is not None:
-                from matplotlib.colors import LinearSegmentedColormap
-                matplotlib.colormaps.register(LinearSegmentedColormap(name or "custom", data, lut=lut))
-            elif colors is not None:
-                from matplotlib.colors import ListedColormap
-                matplotlib.colormaps.register(ListedColormap(colors, name or "custom"))
-        except Exception:
-            pass
-    cm.register_cmap = _register_cmap
-import os
-PYLEECAN_ERROR = None
-# Use /tmp for serverless environment compatibility (read-only filesystem)
-SAFE_USER_DIR = os.path.join("/tmp", ".pyleecan")
-os.makedirs(SAFE_USER_DIR, exist_ok=True)
-os.environ.setdefault("PYLEECAN_USER_DIR", SAFE_USER_DIR)
-os.environ.setdefault("PYLEECAN_CONFIG_DIR", SAFE_USER_DIR)
-try:
-    import pyleecan
-    PYLEECAN_AVAILABLE = True
-    PYLEECAN_VERSION = getattr(pyleecan, "__version__", "unknown")
-except Exception as e:
-    PYLEECAN_AVAILABLE = False
-    PYLEECAN_VERSION = "unavailable"
-    PYLEECAN_ERROR = repr(e)
 
-app = Flask(__name__, template_folder="templates", static_folder="static")
+# --- 辅助函数 ---
 
+@st.cache_data(ttl=3600)
+def get_sector_list():
+    """获取板块列表 (缓存 1 小时)"""
+    try:
+        # 优先尝试新浪接口，因为它在当前环境似乎更稳定
+        sectors = ak.stock_sector_spot(indicator="新浪行业")
+        return sectors['板块'].tolist()
+    except Exception:
+        # 备用：生成一些静态的常见板块，防止完全无法使用
+        return ["半导体", "白酒", "银行", "证券", "医药商业", "房地产开发", "电力行业", "汽车整车"]
 
-@app.route("/", methods=["GET"])
-def index():
-    return render_template("index.html")
-
-
-@app.route("/simulate", methods=["POST"])
-def simulate():
-    data = {
-        "voltage_v": request.form.get("voltage_v", "24"),
-        "R_ohm": request.form.get("R_ohm", "0.2"),
-        "Kt_Nm_per_A": request.form.get("Kt_Nm_per_A", "0.05"),
-        "Ke_Vs_per_rad": request.form.get("Ke_Vs_per_rad", "0.05"),
-        "B_Nm_s_per_rad": request.form.get("B_Nm_s_per_rad", "0.0005"),
-        "v_bus_v": request.form.get("v_bus_v", request.form.get("voltage_v", "24")),
-        "pwm_duty": request.form.get("pwm_duty", "1.0"),
-    }
-    result = simulate_bldc(data)
-    return jsonify(result)
-
-
-@app.route("/design", methods=["POST"])
-def design():
-    d_stator_in = float(request.form.get("d_stator_in_mm", "60"))
-    d_stator_out = float(request.form.get("d_stator_out_mm", "120"))
-    d_rotor_in = float(request.form.get("d_rotor_in_mm", "20"))
-    d_rotor_out = float(request.form.get("d_rotor_out_mm", "58"))
-    rotor_type = request.form.get("rotor_type", "IN")
-    voltage_v = float(request.form.get("voltage_v", "24"))
-    torque_req = float(request.form.get("torque_req_Nm", "5"))
-    R_ohm = float(request.form.get("R_ohm", "0.2"))
-    Kt = float(request.form.get("Kt_Nm_per_A", "0.05"))
-    Ke = float(request.form.get("Ke_Vs_per_rad", "0.05"))
-    B = float(request.form.get("B_peak_T", "0.9"))
-    min_slot_w = float(request.form.get("min_slot_width_mm", "1.0"))
-    slots_poles = propose_slot_pole(d_stator_in, d_stator_out, d_rotor_in, d_rotor_out, torque_req)
-    slots = int(slots_poles["slots"])
-    poles = int(slots_poles["poles"])
-    dxf_b64 = generate_dxf(d_stator_in, d_stator_out, d_rotor_in, d_rotor_out, slots, poles, rotor_type=rotor_type)
-    flux_b64 = flux_map(d_stator_in, d_rotor_out, poles, B, rotor_type=rotor_type, d_stator_out=d_stator_out, d_rotor_in=d_rotor_in)
-    T_cog, cogging_b64 = cogging_torque_estimate(slots, poles, B, (d_stator_in - d_rotor_out) / 2.0)
-    speed_rpm = float(request.form.get("design_speed_rpm", "3000"))
-    steel_grade = request.form.get("steel_grade", "35WW270")
-    eff = efficiency_with_material(voltage_v, R_ohm, Kt, Ke, torque_req, speed_rpm, steel_grade, B, mass_kg=1.0)
-    materials = {
-        "stator_core": steel_grade,
-        "rotor_core": steel_grade,
-        "magnet": request.form.get("magnet_grade", "N35"),
-    }
-    warns = constraint_checks(d_stator_in, d_stator_out, d_rotor_in, d_rotor_out, slots, min_slot_w)
-    opts = optimize_slot_pole(slots, poles)
-    
-    # Pyleecan Geometry
-    machine = create_pyleecan_machine(d_stator_in, d_stator_out, d_rotor_in, d_rotor_out, slots, poles, rotor_type)
-    pyleecan_img_b64 = pyleecan_plot(machine)
-    
-    report = {
-        "inputs": {
-            "d_stator_in_mm": d_stator_in,
-            "d_stator_out_mm": d_stator_out,
-            "d_rotor_in_mm": d_rotor_in,
-            "d_rotor_out_mm": d_rotor_out,
-            "rotor_type": rotor_type,
-            "torque_req_Nm": torque_req,
-            "B_peak_T": B,
-            "design_speed_rpm": speed_rpm,
-        },
-        "outputs": {
-            "slots": slots,
-            "poles": poles,
-            "efficiency": eff,
-            "cogging_torque_Nm": T_cog,
-            "materials": materials,
-            "warnings": warns,
-            "optimize": opts,
-        },
-    }
-    zip_b64 = assemble_zip(dxf_b64, flux_b64, cogging_b64, report)
-    return jsonify(
-        {
-            "slots": slots,
-            "poles": poles,
-            "dxf_base64": dxf_b64,
-            "flux_map_base64": flux_b64,
-            "cogging_torque_Nm": T_cog,
-            "cogging_curve_base64": cogging_b64,
-            "efficiency": eff,
-            "materials": materials,
-            "warnings": warns,
-            "optimize": opts,
-            "zip_base64": zip_b64,
-            "pyleecan_image_base64": pyleecan_img_b64,
-        }
-    )
-
-
-@app.route("/auto_design", methods=["POST"])
-def auto_design():
-    # 1. Parse Inputs
-    d_stator_in = float(request.form.get("d_stator_in_mm", "60"))
-    d_stator_out = float(request.form.get("d_stator_out_mm", "120"))
-    d_rotor_in = float(request.form.get("d_rotor_in_mm", "20"))
-    d_rotor_out = float(request.form.get("d_rotor_out_mm", "58"))
-    rotor_type = request.form.get("rotor_type", "IN")
-    voltage_v = float(request.form.get("voltage_v", "24"))
-    torque_req = float(request.form.get("torque_req_Nm", "5"))
-    speed_req = float(request.form.get("design_speed_rpm", "3000"))
-    max_current = float(request.form.get("max_current_a", "30"))
-    generations = int(request.form.get("generations", "15"))
-    cogging_req = float(request.form.get("cogging_req_Nm", "0.05"))
-    stack_length = float(request.form.get("stack_length_mm", "40"))
-    
-    # 2. Run GA Optimization
-    from design import ga_optimize_full, generate_efficiency_map, generate_torque_curve, judge_design_quality
-    
-    opt_res = ga_optimize_full(
-        d_stator_in, d_stator_out, d_rotor_in, d_rotor_out,
-        voltage_v, torque_req, speed_req, max_current,
-        rotor_type=rotor_type, generations=generations, pop_size=40,
-        max_cogging_torque_Nm=cogging_req, stack_length_mm=stack_length
-    )
-    
-    # 3. Extract Optimized Params
-    slots = int(opt_res["optimized_params"]["slots"])
-    poles = int(opt_res["optimized_params"]["poles"])
-    turns = int(opt_res["optimized_params"]["turns_per_slot"])
-    mag_th = float(opt_res["optimized_params"]["magnet_thickness_mm"])
-    R_ohm = float(opt_res["optimized_params"]["R_ohm"])
-    Kt = float(opt_res["optimized_params"]["Kt"])
-    Ke = float(opt_res["optimized_params"]["Ke"])
-    eff = float(opt_res["optimized_params"]["efficiency"])
-    tcog_val = float(opt_res["optimized_params"].get("cogging_torque_Nm", 0))
-    stack_len = float(opt_res["optimized_params"].get("stack_length_mm", 0))
-    
-    # Return structure directly from ga_optimize_full which now contains everything
-    return jsonify({
-        "optimized_params": opt_res["optimized_params"],
-        "ai_judgment": opt_res["optimized_params"]["ai_judgment"],
-        "dxf_base64": opt_res["dxf"],
-        "flux_map_base64": opt_res["plots"]["flux_map"],
-        "efficiency_map_base64": opt_res["plots"]["efficiency_map"],
-        "torque_curve_base64": opt_res["plots"]["torque_curve"],
-         "mechanical_drawing_base64": opt_res["plots"]["mechanical_drawing"],
-         "pyleecan_image_base64": None # Explicitly None
-     })
-
-
-@app.route("/optimize", methods=["POST"])
-def optimize():
-    d_stator_in = float(request.form.get("d_stator_in_mm", "60"))
-    d_stator_out = float(request.form.get("d_stator_out_mm", "120"))
-    d_rotor_in = float(request.form.get("d_rotor_in_mm", "20"))
-    d_rotor_out = float(request.form.get("d_rotor_out_mm", "58"))
-    rotor_type = request.form.get("rotor_type", "IN")
-    voltage_v = float(request.form.get("voltage_v", "24"))
-    torque_req = float(request.form.get("torque_req_Nm", "5"))
-    R_ohm = float(request.form.get("R_ohm", "0.2"))
-    Kt = float(request.form.get("Kt_Nm_per_A", "0.05"))
-    Ke = float(request.form.get("Ke_Vs_per_rad", "0.05"))
-    B = float(request.form.get("B_peak_T", "0.9"))
-    min_slot_w = float(request.form.get("min_slot_width_mm", "1.0"))
-    generations = int(request.form.get("generations", "6"))
-    pop_size = int(request.form.get("pop_size", "24"))
-    res = ga_optimize(d_stator_in, d_stator_out, d_rotor_in, d_rotor_out, voltage_v, torque_req, R_ohm, Kt, Ke, B, min_slot_w, rotor_type=rotor_type, generations=generations, pop_size=pop_size)
-    return jsonify({"candidates": res})
-
-@app.route("/stream_progress")
-def stream_progress():
-    from design import get_ga_progress
-    import time, json
-    
-    def generate():
-        while True:
-            progress = get_ga_progress()
-            data = json.dumps(progress)
-            yield f"data: {data}\n\n"
-            if progress["status"] == "completed":
-                break
-            time.sleep(0.5)
+def get_sector_stocks(sector_name):
+    """获取指定板块的股票列表"""
+    try:
+        sectors = ak.stock_sector_spot(indicator="新浪行业")
+        matched_sectors = sectors[sectors['板块'].str.contains(sector_name)]
+        
+        if matched_sectors.empty:
+            return None, f"未找到名称包含 '{sector_name}' 的板块"
             
-    return app.response_class(generate(), mimetype="text/event-stream")
+        target_sector = matched_sectors.iloc[0]
+        sector_label = target_sector['label']
+        sector_real_name = target_sector['板块']
+        
+        details = ak.stock_sector_detail(sector=sector_label)
+        if details.empty:
+            return None, "该板块没有成分股数据"
+            
+        return details[['code', 'name']], sector_real_name
+    except Exception as e:
+        return None, str(e)
 
-@app.route("/pyleecan_info", methods=["GET"])
-def pyleecan_info():
-    return jsonify({"available": PYLEECAN_AVAILABLE, "version": PYLEECAN_VERSION, "error": PYLEECAN_ERROR})
+def get_stock_data(symbol):
+    """尝试多种接口获取数据"""
+    # 1. 尝试东方财富接口 (ak.stock_zh_a_hist) - 数据最全
+    try:
+        df = ak.stock_zh_a_hist(symbol=symbol, period="daily", adjust="qfq")
+        if not df.empty:
+            df.columns = ['date', 'open', 'close', 'high', 'low', 'volume', 'amount', 'amplitude', 'pct_chg', 'change', 'turnover']
+            return df
+    except:
+        pass
+        
+    # 2. 尝试新浪接口 (ak.stock_zh_a_daily) - 备用
+    try:
+        # 新浪接口需要加前缀 sz/sh
+        prefix_symbol = ""
+        if symbol.startswith("6"): prefix_symbol = f"sh{symbol}"
+        elif symbol.startswith("0") or symbol.startswith("3"): prefix_symbol = f"sz{symbol}"
+        else: prefix_symbol = symbol
+        
+        df = ak.stock_zh_a_daily(symbol=prefix_symbol, adjust="qfq")
+        if not df.empty:
+            # 新浪列名: date, open, high, low, close, volume, amount, outstanding_share, turnover
+            # 我们需要标准化列名以适配 strategies
+            # 注意：新浪数据可能没有 pct_chg (涨跌幅)，需要自己计算
+            df = df.rename(columns={'outstanding_share': 'turnover'}) # 这里的 turnover 含义不同，暂且忽略
+            
+            # 简单计算涨跌幅
+            df['pct_chg'] = df['close'].pct_change() * 100
+            df['pct_chg'] = df['pct_chg'].fillna(0)
+            
+            return df
+    except:
+        pass
+        
+    return pd.DataFrame() # 均失败返回空
 
 
-if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=8000, debug=True)
+# --- 核心功能模块 ---
+
+def run_scan(stock_list, progress_bar, status_text):
+    results = []
+    total = len(stock_list)
+    
+    for index, row in stock_list.iterrows():
+        # 更新进度
+        progress = (index + 1) / total
+        progress_bar.progress(progress)
+        symbol = row['code']
+        name = row['name']
+        status_text.text(f"正在分析: {symbol} {name} ({index+1}/{total})")
+        
+        try:
+            # 获取日线数据 (使用封装的函数，支持 fallback)
+            df = get_stock_data(symbol)
+            
+            if df.empty or len(df) < 60:
+                continue
+            
+            # 这里的列名已经在 get_stock_data 中处理过了
+            
+            # 计算指标
+            df['ma5'] = df['close'].rolling(window=5).mean()
+            df['ma10'] = df['close'].rolling(window=10).mean()
+            df['ma20'] = df['close'].rolling(window=20).mean()
+            df['ma60'] = df['close'].rolling(window=60).mean()
+            df = strategies.calculate_kdj(df)
+            
+            latest = df.iloc[-1]
+            matched_patterns = []
+
+            if strategies.check_comprehensive_strategy(df):
+                matched_patterns.append("综合策略")
+            if strategies.check_old_duck_head(df):
+                matched_patterns.append("老鸭头")
+            if strategies.check_platform_breakout(df):
+                matched_patterns.append("平台突破")
+            if strategies.check_dragon_turns_head(df):
+                matched_patterns.append("龙回头")
+            
+            if matched_patterns:
+                results.append({
+                    '代码': symbol,
+                    '名称': name,
+                    '最新价': latest['close'],
+                    '日期': latest['date'],
+                    '匹配模式': ", ".join(matched_patterns)
+                })
+                
+        except Exception as e:
+            # 记录错误（可选：在界面上显示警告如果错误过多）
+            # print(f"Error scanning {symbol}: {e}")
+            continue
+            
+    return pd.DataFrame(results)
+
+def run_backtest_logic(days_lookback, sample_size, progress_bar, status_text):
+    try:
+        hs300 = ak.index_stock_cons(symbol="000300")
+        stock_list = hs300[['stock_code', 'stock_name']]
+        stock_list.columns = ['code', 'name']
+        stock_list = stock_list.head(sample_size)
+    except Exception:
+        stock_list = ak.stock_info_a_code_name().head(sample_size)
+
+    stats = {
+        "综合策略": {"signals": 0, "wins": 0, "total_return": 0.0},
+        "老鸭头": {"signals": 0, "wins": 0, "total_return": 0.0},
+        "平台突破": {"signals": 0, "wins": 0, "total_return": 0.0},
+        "龙回头": {"signals": 0, "wins": 0, "total_return": 0.0}
+    }
+    
+    start_date = (datetime.datetime.now() - datetime.timedelta(days=days_lookback + 60)).strftime("%Y%m%d")
+    end_date = datetime.datetime.now().strftime("%Y%m%d")
+    
+    total = len(stock_list)
+    for index, row in stock_list.iterrows():
+        progress_bar.progress((index + 1) / total)
+        symbol = row['code']
+        status_text.text(f"回测中: {symbol} {row['name']}")
+        
+        try:
+            df = get_stock_data(symbol)
+            if df.empty or len(df) < 60: continue
+            
+            # df.columns = ['date', 'open', 'close', 'high', 'low', 'volume', 'amount', 'amplitude', 'pct_chg', 'change', 'turnover']
+            
+            df['ma5'] = df['close'].rolling(window=5).mean()
+            df['ma10'] = df['close'].rolling(window=10).mean()
+            df['ma20'] = df['close'].rolling(window=20).mean()
+            df['ma60'] = df['close'].rolling(window=60).mean()
+            df = strategies.calculate_kdj(df)
+            
+            analysis_start_idx = len(df) - days_lookback
+            if analysis_start_idx < 60: analysis_start_idx = 60
+            
+            for i in range(analysis_start_idx, len(df) - 5):
+                current_df = df.iloc[:i+1]
+                future_df = df.iloc[i+1:i+6]
+                
+                if future_df.empty: continue
+                
+                entry_price = current_df.iloc[-1]['close']
+                max_price = future_df['high'].max()
+                max_return = (max_price - entry_price) / entry_price
+                is_win = max_return > 0.03
+                
+                if strategies.check_comprehensive_strategy(current_df):
+                    stats["综合策略"]["signals"] += 1
+                    if is_win: stats["综合策略"]["wins"] += 1
+                    stats["综合策略"]["total_return"] += max_return
+
+                if strategies.check_old_duck_head(current_df):
+                    stats["老鸭头"]["signals"] += 1
+                    if is_win: stats["老鸭头"]["wins"] += 1
+                    stats["老鸭头"]["total_return"] += max_return
+
+                if strategies.check_platform_breakout(current_df):
+                    stats["平台突破"]["signals"] += 1
+                    if is_win: stats["平台突破"]["wins"] += 1
+                    stats["平台突破"]["total_return"] += max_return
+                    
+                if strategies.check_dragon_turns_head(current_df):
+                    stats["龙回头"]["signals"] += 1
+                    if is_win: stats["龙回头"]["wins"] += 1
+                    stats["龙回头"]["total_return"] += max_return
+                    
+        except Exception:
+            continue
+            
+    return stats
+
+# --- 页面 UI ---
+
+st.title("📈 A股 智能选股助手")
+st.markdown("基于技术指标和经典K线形态的自动化扫描工具")
+
+# 侧边栏
+with st.sidebar:
+    st.header("功能选择")
+    app_mode = st.radio("选择模式", ["K线扫描", "策略回测", "情绪监控"])
+    
+    st.markdown("---")
+    st.markdown("### 关于")
+    st.markdown("本工具支持：\n- 综合策略\n- 老鸭头\n- 平台突破\n- 龙回头")
+
+if app_mode == "K线扫描":
+    st.header("🔍 股票扫描")
+    
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        # 获取板块列表
+        sector_list = get_sector_list()
+        selected_sector = st.selectbox("选择扫描板块", ["全市场 (前50只演示)", "全市场 (全量-很慢)", "自定义输入"] + sector_list)
+        
+        custom_sector = ""
+        if selected_sector == "自定义输入":
+            custom_sector = st.text_input("请输入板块名称 (如: 半导体)")
+            
+    with col2:
+        st.write("") # Spacer
+        st.write("")
+        start_btn = st.button("开始扫描", type="primary")
+
+    if start_btn:
+        stock_list = None
+        limit_msg = ""
+        
+        # 检查网络连接 (简单检查)
+        # try:
+        #    get_stock_data("000001")
+        # except Exception as e:
+        #     st.error(f"无法连接到数据源...\n错误详情: {e}")
+        #     st.stop()
+        
+        if selected_sector == "全市场 (前50只演示)":
+            try:
+                stock_list = ak.stock_info_a_code_name().head(50)
+                limit_msg = " (演示模式：仅扫描前 50 只)"
+            except Exception as e:
+                st.error(f"获取股票列表失败: {e}")
+        elif selected_sector == "全市场 (全量-很慢)":
+            try:
+                stock_list = ak.stock_info_a_code_name()
+                limit_msg = " (全量模式)"
+            except Exception as e:
+                st.error(f"获取股票列表失败: {e}")
+        else:
+            sector_name = custom_sector if selected_sector == "自定义输入" else selected_sector
+            if not sector_name:
+                st.warning("请输入有效的板块名称")
+            else:
+                with st.spinner(f"正在获取 [{sector_name}] 成分股..."):
+                    stocks, real_name = get_sector_stocks(sector_name)
+                    if stocks is not None:
+                        stock_list = stocks
+                        limit_msg = f" (板块: {real_name})"
+                    else:
+                        st.error(real_name) # 这里 real_name 是错误信息
+
+        if stock_list is not None:
+            st.info(f"开始扫描 {len(stock_list)} 只股票{limit_msg}...")
+            
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            result_df = run_scan(stock_list, progress_bar, status_text)
+            
+            progress_bar.progress(100)
+            status_text.text("扫描完成！")
+            
+            if not result_df.empty:
+                st.success(f"共发现 {len(result_df)} 只符合条件的股票")
+                st.dataframe(result_df, use_container_width=True)
+                
+                # 下载按钮
+                csv = result_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    "下载结果 CSV",
+                    csv,
+                    "scan_results.csv",
+                    "text/csv",
+                    key='download-csv'
+                )
+            else:
+                st.warning("未找到符合条件的股票。")
+
+elif app_mode == "策略回测":
+    st.header("🔙 策略回测")
+    st.info("使用沪深300成分股作为样本，测试过去一段时间的策略表现。")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        lookback = st.slider("回测天数", 30, 180, 90)
+    with col2:
+        sample_size = st.slider("样本数量 (只)", 10, 300, 50)
+        
+    if st.button("开始回测", type="primary"):
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        stats = run_backtest_logic(lookback, sample_size, progress_bar, status_text)
+        
+        progress_bar.progress(100)
+        status_text.text("回测完成")
+        
+        st.subheader("回测结果")
+        st.caption("胜率标准：信号出现后未来 5 天内最高涨幅 > 3%")
+        
+        # 展示结果
+        results_data = []
+        for name, data in stats.items():
+            signals = data["signals"]
+            win_rate = 0
+            avg_return = 0
+            if signals > 0:
+                win_rate = (data["wins"] / signals) * 100
+                avg_return = (data["total_return"] / signals) * 100
+            
+            results_data.append({
+                "策略名称": name,
+                "触发信号次数": signals,
+                "胜率 (%)": f"{win_rate:.2f}%",
+                "平均最高涨幅 (%)": f"{avg_return:.2f}%"
+            })
+            
+        st.table(pd.DataFrame(results_data))
+
+elif app_mode == "情绪监控":
+    st.header("📰 市场情绪监控")
+    
+    if st.button("刷新今日情绪", type="primary"):
+        with st.spinner("正在获取新闻数据..."):
+            try:
+                # CCTV - 优先获取今天，如果为空（例如早上），则获取昨天
+                st.subheader("📺 新闻联播 (宏观)")
+                today_str = datetime.datetime.now().strftime("%Y%m%d")
+                cctv_df = ak.news_cctv(date=today_str)
+                
+                if cctv_df.empty:
+                    yesterday_str = (datetime.datetime.now() - datetime.timedelta(days=1)).strftime("%Y%m%d")
+                    cctv_df = ak.news_cctv(date=yesterday_str)
+                    if not cctv_df.empty:
+                        st.caption(f"今日数据暂未更新，显示昨日 ({yesterday_str}) 数据")
+                
+                if not cctv_df.empty:
+                    for i, row in cctv_df.head(3).iterrows():
+                        with st.expander(f"{row['title']}"):
+                            st.write(row['content'])
+                else:
+                    st.write("暂无近期新闻联播数据。")
+                
+                # 个股/市场新闻
+                st.subheader("🔥 关键词扫描")
+                # 使用贵州茅台作为示例，或者尝试获取更广泛的
+                news_df = ak.stock_news_em(symbol="600519")
+                keywords = ["上涨", "拉升", "涨停", "利好", "突破", "暴涨", "资金", "买入", "增长"]
+                
+                found_news = []
+                for index, row in news_df.iterrows():
+                    title = row.get('title', '')
+                    content = row.get('content', '')
+                    time_str = row.get('public_time', '')
+                    full_text = f"{title} {content}"
+                    
+                    if any(k in full_text for k in keywords):
+                        found_news.append({"时间": time_str, "标题": title, "内容": content})
+                        if len(found_news) >= 10: break
+                
+                if found_news:
+                    for news in found_news:
+                        st.markdown(f"**[{news['时间']}]** {news['标题']}")
+                else:
+                    st.info("在示例源中未扫描到包含 '暴涨/利好' 等关键词的重磅新闻。")
+                    
+            except Exception as e:
+                st.error(f"获取新闻失败: {e}")

@@ -1,15 +1,5 @@
-# 基础框架
-aiohttp
-aiohttp_jinja2
-python-dotenv
-loguru
-cryptography
-certifi
-
-# 加密货币与数据分析
+akshare
 pandas
-ta
-ccxt
-numpy
-requests
-flask
+openpyxl
+tqdm
+streamlit
