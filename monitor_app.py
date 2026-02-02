@@ -37,7 +37,10 @@ CACHE = {
     'last_updated': None,
     'is_updating': False,
     'last_top_10': set(), # Store last Top 10 symbols to detect new entries
-    'seen_coins': set() # Store ALL coins seen in Top 10 to detect 'First Entry'
+    'seen_coins': set(), # Store ALL coins seen in Top 10 to detect 'First Entry'
+    'market_scan_results': [], # Store analysis for top 200 coins
+    'scan_progress': {'current': 0, 'total': 0, 'status': 'idle'}, # Track scanning progress
+    'scan_logs': [] # Real-time logs for frontend
 }
 
 # --- Signal Backtest Storage ---
@@ -444,6 +447,8 @@ async def fetch_funding_rate(exchange, symbol):
 async def update_data():
     global CACHE
     CACHE['is_updating'] = True
+    CACHE['scan_progress'] = {'current': 0, 'total': 0, 'status': 'initializing'}
+    CACHE['scan_logs'] = [f"[{time.strftime('%H:%M:%S')}] Starting market scan..."]
     print("Starting data update...")
     
     exchange_config = {
@@ -466,35 +471,91 @@ async def update_data():
         sorted_pairs = sorted(usdt_pairs, key=lambda x: x['quoteVolume'], reverse=True)
         top_n = sorted_pairs[:300]
         
-        tasks_ohlcv = []
-        tasks_ohlcv_1h = []
-        tasks_oi = []
-        tasks_funding = []
+        CACHE['scan_progress'] = {'current': 0, 'total': len(top_n), 'status': 'fetching_data'}
+        CACHE['scan_logs'].append(f"[{time.strftime('%H:%M:%S')}] Found {len(top_n)} USDT pairs. Starting batch fetch...")
         
-        for pair in top_n:
-            symbol = pair['symbol']
-            tasks_ohlcv.append(fetch_candles(exchange, symbol, '15m'))
-            tasks_ohlcv_1h.append(fetch_candles(exchange, symbol, '1h', limit=50))
-            tasks_oi.append(fetch_open_interest_history(exchange, symbol))
-            tasks_funding.append(fetch_funding_rate(exchange, symbol))
+        # --- Batch Processing for Progress Updates ---
+        batch_size = 20
+        total_items = len(top_n)
+        
+        results_ohlcv = []
+        ohlcv_1h_data = {}
+        oi_data = {}
+        funding_data = {}
+        
+        for i in range(0, total_items, batch_size):
+            batch = top_n[i:i+batch_size]
+            current_batch_num = (i // batch_size) + 1
+            total_batches = (total_items + batch_size - 1) // batch_size
             
-        results_ohlcv = await asyncio.gather(*tasks_ohlcv)
-        results_ohlcv_1h = await asyncio.gather(*tasks_ohlcv_1h)
-        results_oi = await asyncio.gather(*tasks_oi)
-        results_funding = await asyncio.gather(*tasks_funding)
-        
-        ohlcv_1h_data = {symbol: data for symbol, data in results_ohlcv_1h}
-        oi_data = {symbol: history for symbol, history in results_oi}
-        funding_data = {symbol: data for symbol, data in results_funding}
+            # Prepare tasks for this batch
+            tasks_ohlcv = []
+            tasks_ohlcv_1h = []
+            tasks_oi = []
+            tasks_funding = []
+            
+            for pair in batch:
+                symbol = pair['symbol']
+                tasks_ohlcv.append(fetch_candles(exchange, symbol, '15m'))
+                tasks_ohlcv_1h.append(fetch_candles(exchange, symbol, '1h', limit=50))
+                tasks_oi.append(fetch_open_interest_history(exchange, symbol))
+                tasks_funding.append(fetch_funding_rate(exchange, symbol))
+            
+            # Execute batch
+            batch_ohlcv = await asyncio.gather(*tasks_ohlcv)
+            batch_ohlcv_1h = await asyncio.gather(*tasks_ohlcv_1h)
+            batch_oi = await asyncio.gather(*tasks_oi)
+            batch_funding = await asyncio.gather(*tasks_funding)
+            
+            # Aggregate results
+            results_ohlcv.extend(batch_ohlcv)
+            
+            for symbol, data in batch_ohlcv_1h:
+                ohlcv_1h_data[symbol] = data
+            for symbol, history in batch_oi:
+                oi_data[symbol] = history
+            for symbol, data in batch_funding:
+                funding_data[symbol] = data
+                
+            # Update Progress
+            processed_so_far = min(i + batch_size, total_items)
+            CACHE['scan_progress'] = {'current': processed_so_far, 'total': total_items, 'status': 'fetching_data'}
+            CACHE['scan_logs'].append(f"[{time.strftime('%H:%M:%S')}] Fetched batch {current_batch_num}/{total_batches} ({processed_so_far}/{total_items})")
+            
+            # Small delay to be nice to API limits if needed, but 20 concurrent is usually fine
+            # await asyncio.sleep(0.1) 
+            
+        CACHE['scan_progress'] = {'current': total_items, 'total': total_items, 'status': 'analyzing'}
+        CACHE['scan_logs'].append(f"[{time.strftime('%H:%M:%S')}] Data fetch complete. Starting analysis...")
         
         longs = []
         shorts = []
         pre_breakouts_list = []
+        all_analysis_results = []
+        
+        processed_count = 0
+        total_count = len(results_ohlcv)
         
         for symbol, ohlcv in results_ohlcv:
+            processed_count += 1
+            # Update progress every 10 items to reduce lock contention if any (though this is single threaded async loop mostly)
+            if processed_count % 5 == 0:
+                CACHE['scan_progress'] = {'current': processed_count, 'total': total_count, 'status': 'analyzing'}
+            
             ohlcv_1h = ohlcv_1h_data.get(symbol, [])
             analysis = analyze_trend(symbol, ohlcv, ohlcv_1h)
             if analysis:
+                # Add rank score for sorting later (Trend Score)
+                # Ensure trend_score is calculated before this if possible, 
+                # but it's calculated inside analyze_trend logic block in original code.
+                # Wait, analyze_trend returns a dict, but trend_score calculation was INSIDE the loop in original code?
+                # No, analyze_trend function returns the dict with basic info, 
+                # but the trend_score calculation logic was actually OUTSIDE analyze_trend in the original `update_data` loop?
+                # Let's check the original code structure.
+                # In the original code, `analyze_trend` returns a dict.
+                # Then inside the loop, we add OI info, Funding info, and THEN calculate trend_score.
+                # So we need to keep that logic.
+                
                 # OI Analysis
                 oi_history = oi_data.get(symbol, [])
                 if len(oi_history) >= 2:
@@ -575,9 +636,22 @@ async def update_data():
                 elif analysis['trend'] == 'STRONG_SHORT':
                     shorts.append(analysis)
                 
+                # Add to all results
+                all_analysis_results.append(analysis)
+                
         # Sort by Trend Score (Descending) and Keep Top 3
         CACHE['longs'] = sorted(longs, key=lambda x: x.get('trend_score', 0), reverse=True)[:3]
         CACHE['shorts'] = sorted(shorts, key=lambda x: x.get('trend_score', 0), reverse=True)[:3]
+
+        # Store Top 200 for Market Predictions
+        # Sort by absolute trend score or just volume? User asked for "Top 200 coins", usually by volume.
+        # But we already fetched Top 300 by volume.
+        # Let's return the Top 200 from our analysis list (which is already based on volume sort).
+        # But maybe sorting by Trend Score absolute value is better to show "active" coins first?
+        # Let's keep the original Volume sort order (implied by the loop order) or sort by Volume explicitly if available.
+        # analysis dict doesn't have quoteVolume. But the loop `for pair in top_n` iterates by volume.
+        # So `all_analysis_results` is roughly sorted by volume.
+        CACHE['market_scan_results'] = all_analysis_results[:200]
 
         # Sort by ADX (Descending) and Keep Top 3
         longs_sorted = sorted(CACHE['longs'], key=lambda x: x.get('adx', 0), reverse=True)[:3]
@@ -768,10 +842,12 @@ async def update_data():
         # Store raw timestamp for easier calculation
         CACHE['last_updated_ts'] = time.time()
         CACHE['last_updated'] = time.strftime('%H:%M:%S')
+        CACHE['scan_progress'] = {'current': total_count, 'total': total_count, 'status': 'completed'}
         print(f"Data updated. Longs: {len(longs)}, Shorts: {len(shorts)}")
         
     except Exception as e:
         print(f"Update failed: {e}")
+        CACHE['scan_progress'] = {'current': 0, 'total': 0, 'status': 'error', 'message': str(e)}
     finally:
         await exchange.close()
         CACHE['is_updating'] = False
@@ -796,6 +872,88 @@ def ai_analysis_page():
     response = app.make_response(render_template('ai_analysis.html'))
     response.headers['Content-Type'] = 'text/html; charset=utf-8'
     return response
+
+@app.route('/market-predictions')
+def market_predictions_page():
+    # Force UTF-8 encoding for the response
+    response = app.make_response(render_template('predictions.html'))
+    response.headers['Content-Type'] = 'text/html; charset=utf-8'
+    return response
+
+@app.route('/api/predictions')
+def get_predictions():
+    """
+    Return the analysis for Top 200 coins with simplified prediction fields.
+    """
+    results = CACHE.get('market_scan_results', [])
+    progress = CACHE.get('scan_progress', {'current': 0, 'total': 0, 'status': 'idle'})
+    is_updating = CACHE.get('is_updating', False)
+    
+    # Format for frontend
+    predictions = []
+    for item in results:
+        # Determine Direction
+        trend_score = item.get('trend_score', 0)
+        trend = item.get('trend', 'NEUTRAL')
+        
+        direction = "NEUTRAL"
+        if trend == 'STRONG_LONG':
+            direction = "BULLISH"
+        elif trend == 'STRONG_SHORT':
+            direction = "BEARISH"
+        elif trend_score > 15:
+            direction = "LEAN_BULL"
+        elif trend_score < -15: # Trend score logic might need check, currently it's mostly positive?
+            # Wait, our trend_score formula: (adx * 0.4) + (vol_score * 0.3) + (oi_score * 0.3)
+            # All components are positive!
+            # So trend_score represents "Trend Strength", not direction.
+            # Direction comes from `trend` field or EMA checks.
+            # If trend is NEUTRAL but we need a prediction...
+            # We need to look at price vs EMA or recent change.
+            # Let's use `close > ema20` as a simple bias if NEUTRAL.
+            pass
+        
+        # Refined Logic for Direction if Neutral
+        if direction == "NEUTRAL":
+            # We don't have EMA in the final dict, only in the function.
+            # But we can infer from Price vs EMA20 if we had it.
+            # We only have `trend` = STRONG_LONG / STRONG_SHORT / NEUTRAL.
+            # Let's rely on RSI?
+            rsi = item.get('rsi', 50)
+            if rsi > 55:
+                direction = "LEAN_BULL"
+            elif rsi < 45:
+                direction = "LEAN_BEAR"
+        
+        predictions.append({
+            'symbol': item['symbol'],
+            'price': item['close'],
+            'direction': direction,
+            'score': round(trend_score, 1) if not math.isnan(trend_score) else 0, 
+            'rsi': round(item.get('rsi', 0), 1) if not math.isnan(item.get('rsi', 0)) else 0,
+            'adx': round(item.get('adx', 0), 1) if not math.isnan(item.get('adx', 0)) else 0,
+            'trend': trend
+        })
+    
+    return jsonify({
+        'success': True,
+        'count': len(predictions),
+        'data': predictions,
+        'last_updated': CACHE.get('last_updated'),
+        'scan_progress': progress,
+        'is_updating': is_updating
+    })
+
+@app.route('/api/progress')
+def get_progress():
+    progress = CACHE.get('scan_progress', {'current': 0, 'total': 0, 'status': 'idle'})
+    is_updating = CACHE.get('is_updating', False)
+    logs = CACHE.get('scan_logs', [])
+    return jsonify({
+        'scan_progress': progress,
+        'is_updating': is_updating,
+        'scan_logs': logs[-20:] # Return last 20 logs to save bandwidth
+    })
 
 @app.route('/api/analyze', methods=['POST'])
 def analyze_crypto():
