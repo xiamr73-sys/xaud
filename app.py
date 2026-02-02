@@ -93,13 +93,19 @@ def plot_stock_detail(symbol, name):
         end_date = datetime.datetime.now().strftime("%Y%m%d")
         start_date = (datetime.datetime.now() - datetime.timedelta(days=365)).strftime("%Y%m%d")
         
-        df = ak.stock_zh_a_hist(symbol=symbol, period="daily", start_date=start_date, end_date=end_date, adjust="qfq")
-        if df.empty:
-             # Fallback
+        df = None
+        # 1. 尝试主要接口
+        try:
+            df = ak.stock_zh_a_hist(symbol=symbol, period="daily", start_date=start_date, end_date=end_date, adjust="qfq")
+        except Exception:
+            df = None
+            
+        # 2. 如果主要接口失败或为空，尝试备用接口
+        if df is None or df.empty:
              df = get_stock_data(symbol)
              
         if df is None or df.empty:
-            st.error("无法获取该股票历史数据")
+            st.error("无法获取该股票历史数据 (数据源连接失败)")
             return
 
         df.columns = ['date', 'open', 'close', 'high', 'low', 'volume', 'amount', 'amplitude', 'pct_chg', 'change', 'turnover']
@@ -172,12 +178,17 @@ def plot_chanlun(symbol, name):
         start_date = (datetime.datetime.now() - datetime.timedelta(days=365*2)).strftime("%Y%m%d")
         
         with st.spinner("正在计算缠论分型与笔..."):
-            df = ak.stock_zh_a_hist(symbol=symbol, period="daily", start_date=start_date, end_date=end_date, adjust="qfq")
-            if df.empty:
+            df = None
+            try:
+                df = ak.stock_zh_a_hist(symbol=symbol, period="daily", start_date=start_date, end_date=end_date, adjust="qfq")
+            except Exception:
+                df = None
+            
+            if df is None or df.empty:
                  df = get_stock_data(symbol)
                  
             if df is None or df.empty:
-                st.error("无法获取该股票历史数据")
+                st.error("无法获取该股票历史数据 (数据源连接失败)")
                 return
 
             df.columns = ['date', 'open', 'close', 'high', 'low', 'volume', 'amount', 'amplitude', 'pct_chg', 'change', 'turnover']
