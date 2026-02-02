@@ -8,6 +8,7 @@ import time
 import concurrent.futures
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from chanlun_simple import ChanlunSimple
 
 # 设置页面配置
 st.set_page_config(
@@ -162,6 +163,104 @@ def plot_stock_detail(symbol, name):
         
     except Exception as e:
         st.error(f"绘图失败: {e}")
+
+def plot_chanlun(symbol, name):
+    """绘制缠论分析图"""
+    try:
+        # 获取足够长的数据以进行包含处理和笔识别
+        end_date = datetime.datetime.now().strftime("%Y%m%d")
+        start_date = (datetime.datetime.now() - datetime.timedelta(days=365*2)).strftime("%Y%m%d")
+        
+        with st.spinner("正在计算缠论分型与笔..."):
+            df = ak.stock_zh_a_hist(symbol=symbol, period="daily", start_date=start_date, end_date=end_date, adjust="qfq")
+            if df.empty:
+                 df = get_stock_data(symbol)
+                 
+            if df is None or df.empty:
+                st.error("无法获取该股票历史数据")
+                return
+
+            df.columns = ['date', 'open', 'close', 'high', 'low', 'volume', 'amount', 'amplitude', 'pct_chg', 'change', 'turnover']
+            df['date'] = pd.to_datetime(df['date'])
+            
+            # 缠论计算
+            cl = ChanlunSimple(df)
+            cl.process_inclusion()
+            cl.find_fenxing()
+            bi_list = cl.find_bi()
+            
+            # 绘图数据 (取最近半年的K线展示，但笔需要基于全量计算)
+            plot_start_date = df.iloc[-120]['date'] if len(df) > 120 else df.iloc[0]['date']
+            plot_df = df[df['date'] >= plot_start_date].copy()
+            
+            # 创建图表
+            fig = make_subplots(rows=1, cols=1, subplot_titles=(f'{name} ({symbol}) 缠论分析 (包含处理+笔)',))
+
+            # 1. 原始K线 (半透明背景)
+            fig.add_trace(go.Candlestick(
+                x=plot_df['date'],
+                open=plot_df['open'],
+                high=plot_df['high'],
+                low=plot_df['low'],
+                close=plot_df['close'],
+                name='原始K线',
+                opacity=0.5
+            ))
+            
+            # 2. 绘制笔 (Bi)
+            # 筛选出在绘图时间范围内的笔
+            valid_bi = []
+            for bi in bi_list:
+                if bi['end_date'] >= plot_start_date:
+                    valid_bi.append(bi)
+            
+            # 将笔连接成一条连续的线 (ZigZag style)
+            if valid_bi:
+                bi_x = []
+                bi_y = []
+                # 添加第一笔的起点
+                bi_x.append(valid_bi[0]['start_date'])
+                bi_y.append(valid_bi[0]['start_price'])
+                
+                for bi in valid_bi:
+                    bi_x.append(bi['end_date'])
+                    bi_y.append(bi['end_price'])
+                
+                fig.add_trace(go.Scatter(
+                    x=bi_x, 
+                    y=bi_y, 
+                    mode='lines+markers',
+                    line=dict(color='yellow', width=2),
+                    marker=dict(size=4),
+                    name='笔 (Bi)'
+                ))
+                
+                # 标注笔的端点价格
+                fig.add_trace(go.Scatter(
+                    x=bi_x,
+                    y=bi_y,
+                    mode='text',
+                    text=[f"{y:.2f}" for y in bi_y],
+                    textposition="top center",
+                    name='端点价格'
+                ))
+
+            # 布局设置
+            fig.update_layout(
+                xaxis_rangeslider_visible=False,
+                height=600,
+                margin=dict(l=20, r=20, t=40, b=20),
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                font=dict(color='white')
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            st.info(f"识别到 {len(valid_bi)} 笔 (仅展示最近 120 个交易日范围内)")
+
+    except Exception as e:
+        st.error(f"缠论分析失败: {e}")
 
 def run_scan(stock_list, progress_bar, status_text):
     results = []
@@ -393,7 +492,7 @@ st.markdown("基于技术指标和经典K线形态的自动化扫描工具")
 # 侧边栏
 with st.sidebar:
     st.header("功能选择")
-    app_mode = st.radio("选择模式", ["K线扫描", "策略回测", "情绪监控", "板块资金看板"])
+    app_mode = st.radio("选择模式", ["K线扫描", "策略回测", "情绪监控", "板块资金看板", "缠论分析"])
     
     st.markdown("---")
     st.markdown("### 关于")
@@ -629,3 +728,60 @@ elif app_mode == "板块资金看板":
                 1. 东方财富接口反爬虫限制（云端常见）。
                 2. 当前非交易时间，数据未更新。
                 """)
+
+elif app_mode == "缠论分析":
+    st.header("☯️ 缠论 K 线分析")
+    st.markdown("输入股票代码或名称，自动识别**顶底分型**与**笔 (Bi)**。")
+    
+    # 搜索框
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        query = st.text_input("请输入股票代码或名称 (例如: 600519 或 贵州茅台)", placeholder="支持模糊搜索...")
+    with col2:
+        st.write("")
+        st.write("")
+        search_btn = st.button("开始分析", type="primary")
+        
+    if search_btn and query:
+        # 1. 尝试直接作为代码
+        symbol = None
+        name = ""
+        
+        if query.isdigit() and len(query) == 6:
+            symbol = query
+            name = query # 暂定
+        else:
+            # 2. 模糊搜索名称
+            try:
+                stock_info = ak.stock_info_a_code_name()
+                # 过滤
+                matched = stock_info[stock_info['code'].str.contains(query) | stock_info['name'].str.contains(query)]
+                
+                if matched.empty:
+                    st.error(f"未找到匹配 '{query}' 的股票。")
+                elif len(matched) > 1:
+                    st.warning("找到多只匹配股票，默认分析第一只：")
+                    st.dataframe(matched.head(5))
+                    symbol = matched.iloc[0]['code']
+                    name = matched.iloc[0]['name']
+                else:
+                    symbol = matched.iloc[0]['code']
+                    name = matched.iloc[0]['name']
+            except Exception as e:
+                st.error(f"搜索股票失败: {e}")
+                
+        if symbol:
+            st.success(f"正在分析: {name} ({symbol})")
+            plot_chanlun(symbol, name)
+            
+            st.markdown("""
+            ### 图例说明
+            - **K线**: 原始行情数据 (半透明背景)
+            - **黄色连线**: 识别出的“笔” (Bi)
+            - **端点数字**: 笔的顶/底价格
+            
+            > **注意**: 
+            > 1. 本功能使用了**简化版缠论算法** (包含处理 + 顶底分型 + 笔)。
+            > 2. “笔”的定义严格遵循“顶底分型之间至少包含一根独立K线”的规则。
+            > 3. 仅供技术分析参考，不作为买卖建议。
+            """)
