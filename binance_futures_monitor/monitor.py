@@ -390,16 +390,21 @@ async def fetch_data_and_analyze(exchange, symbol, btc_dumping=False, top_10_sym
             # 转换为 UTC+8 (中国时间)
             first_time_str = (pd.to_datetime(first_time, unit='s') + pd.Timedelta(hours=8)).strftime('%H:%M')
             
+            # 计算相对于首次报警价格的涨幅
+            first_price = alert_history[symbol].get('first_price', latest['close'])
+            price_change_from_first = ((latest['close'] - first_price) / first_price) * 100
+            
             # 推送到 Discord (精简版)
             # 用户要求: 去除止盈止损、去除状态、去除资金费率
             # 仅保留核心信息：币种、分数、价格、OI变动
-            # 新增: 首次报警时间、当前报警次数
+            # 新增: 首次报警时间、当前报警次数、首次报警价格(含涨幅)
             
             discord_msg = (
                 f"🚨 **高分报警** {symbol} | Score: {score}\n"
                 f"**价格**: {latest['close']}\n"
                 f"**OI变动**: {oi_change_pct:.2f}%\n"
-                f"**首次报警**: {first_time_str} (第 {alert_count} 次)"
+                f"**首次报警**: {first_time_str} (第 {alert_count} 次)\n"
+                f"**首报价格**: {first_price} ({price_change_from_first:+.2f}%)"
             )
             # 异步非阻塞推送
             asyncio.create_task(send_discord_alert(discord_msg))
