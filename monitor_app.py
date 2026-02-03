@@ -1076,6 +1076,10 @@ def background_task():
     Background loop to update data every 5 minutes.
     Designed for Google Cloud Run with --no-cpu-throttling.
     """
+    # Wait for Flask to start serving requests before consuming CPU
+    print("Background task waiting 10s for Flask to bind port...")
+    time.sleep(10)
+    
     while True:
         print("Running automatic background update...")
         try:
