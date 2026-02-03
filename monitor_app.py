@@ -1096,25 +1096,24 @@ if __name__ == '__main__':
     t.daemon = True
     t.start()
     
-    # Send startup notification
-    print(f"DEBUG: General Webhook configured: {bool(DISCORD_WEBHOOK_GENERAL)}")
-    if DISCORD_WEBHOOK_GENERAL:
-        print(f"DEBUG: General Webhook starts with: {DISCORD_WEBHOOK_GENERAL[:30]}...")
-    
-    print(f"DEBUG: First Entry Webhook configured: {bool(DISCORD_WEBHOOK_FIRST_ENTRY)}")
-    if DISCORD_WEBHOOK_FIRST_ENTRY:
-        print(f"DEBUG: First Entry Webhook starts with: {DISCORD_WEBHOOK_FIRST_ENTRY[:30]}...")
+    # Define startup notification function to run in background
+    # This prevents network requests from blocking the main thread during startup
+    def send_startup_notification():
+        print(f"DEBUG: General Webhook configured: {bool(DISCORD_WEBHOOK_GENERAL)}")
+        if DISCORD_WEBHOOK_GENERAL:
+            try:
+                print("Sending startup notification to Discord (General)...")
+                send_discord_alert("🟢 **Crypto Monitor Bot Started**\nReady to track market trends!", webhook_url=DISCORD_WEBHOOK_GENERAL)
+            except Exception as e:
+                print(f"Failed to send startup notification: {e}")
 
-    if DISCORD_WEBHOOK_GENERAL:
-        try:
-            print("Sending startup notification to Discord (General)...")
-            send_discord_alert("🟢 **Crypto Monitor Bot Started**\nReady to track market trends!", webhook_url=DISCORD_WEBHOOK_GENERAL)
-        except Exception as e:
-            print(f"Failed to send startup notification: {e}")
+    # Start notification thread
+    threading.Thread(target=send_startup_notification, daemon=True).start()
     
     # Default port should be 5001 if not set, but Cloud Run passes PORT env var
     # If locally running without PORT set, default to 5001 to match user preference
     port = int(os.environ.get('PORT', 5001)) 
     debug = os.environ.get('FLASK_ENV') == 'development'
     
+    print(f"Starting server on port {port}...")
     app.run(host='0.0.0.0', port=port, debug=debug, use_reloader=False)
