@@ -743,16 +743,14 @@ async def update_data():
                 # Send 'First Entry' Alert to Dedicated Channel
                 if first_entry_msg:
                     alert_content = "\n".join(first_entry_msg)
-                    if DISCORD_WEBHOOK_FIRST_ENTRY:
-                        send_discord_alert(alert_content, webhook_url=DISCORD_WEBHOOK_FIRST_ENTRY)
-                    else:
-                        print("Warning: First Entry Webhook not set, falling back to General")
-                        send_discord_alert(alert_content, webhook_url=DISCORD_WEBHOOK_GENERAL)
+                    target_url = DISCORD_WEBHOOK_FIRST_ENTRY or DISCORD_WEBHOOK_GENERAL
+                    send_discord_alert(alert_content, webhook_url=target_url)
 
-                # Send Regular 'New Entry' Alert to General Channel
+                # Send Regular 'New Entry' Alert to Dedicated Channel
                 if new_entry_msg:
                     alert_content = "**🔔 Top 10 榜单变动**\n" + "\n".join(new_entry_msg)
-                    send_discord_alert(alert_content)
+                    target_url = DISCORD_WEBHOOK_FIRST_ENTRY or DISCORD_WEBHOOK_GENERAL
+                    send_discord_alert(alert_content, webhook_url=target_url)
         
         # Update Cache
         CACHE['last_top_10'] = current_top_10_symbols
