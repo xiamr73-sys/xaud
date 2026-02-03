@@ -4,3 +4,14 @@ openpyxl
 tqdm
 streamlit
 plotly
+aiohttp
+aiohttp_jinja2
+python-dotenv
+loguru
+cryptography
+certifi
+ta
+ccxt
+numpy
+requests
+jinja2
