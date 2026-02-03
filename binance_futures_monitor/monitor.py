@@ -387,7 +387,8 @@ async def fetch_data_and_analyze(exchange, symbol, btc_dumping=False, top_10_sym
             alert_count = alert_history[symbol]['count']
             
             # 格式化首次报警时间 (例如: 10:24)
-            first_time_str = pd.to_datetime(first_time, unit='s').strftime('%H:%M')
+            # 转换为 UTC+8 (中国时间)
+            first_time_str = (pd.to_datetime(first_time, unit='s') + pd.Timedelta(hours=8)).strftime('%H:%M')
             
             # 推送到 Discord (精简版)
             # 用户要求: 去除止盈止损、去除状态、去除资金费率
