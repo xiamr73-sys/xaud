@@ -2,17 +2,33 @@ import asyncio
 import os
 import threading
 import time
-import ccxt.async_support as ccxt
-import pandas as pd
-import numpy as np
+# Lazy load heavy libraries to speed up startup
+# import ccxt.async_support as ccxt
+# import pandas as pd
+# import numpy as np
 import requests
 from flask import Flask, render_template, jsonify, request
 from dotenv import load_dotenv
-import ai_analysis_service  # Import the new service
+# import ai_analysis_service 
 import math
 
 # Load environment variables
 load_dotenv()
+
+# Global pandas/numpy/ccxt placeholders
+pd = None
+np = None
+ccxt = None
+ai_analysis_service = None
+
+def lazy_load_libs():
+    global pd, np, ccxt, ai_analysis_service
+    if pd is None:
+        import pandas as pd
+        import numpy as np
+        import ccxt.async_support as ccxt
+        import ai_analysis_service
+        print(">>> Libraries loaded successfully")
 
 API_KEY = os.getenv('BINANCE_API_KEY')
 SECRET_KEY = os.getenv('BINANCE_SECRET_KEY')
@@ -964,6 +980,7 @@ def get_progress():
 
 @app.route('/api/analyze', methods=['POST'])
 def analyze_crypto():
+    lazy_load_libs() # Ensure libs are loaded
     data = request.get_json()
     symbol = data.get('symbol', 'BTC/USDT').strip().upper()
     api_key = data.get('api_key')  # Get API Key from request
@@ -1037,6 +1054,7 @@ def test_backtest():
     """
     Inject a fake signal from 30 minutes ago and trigger verification immediately.
     """
+    lazy_load_libs() # Ensure libs are loaded for backtest logic
     try:
         symbol = "BTC/USDT"
         
@@ -1064,6 +1082,7 @@ def test_backtest():
 
 @app.route('/api/refresh', methods=['POST', 'GET'])
 def refresh_data():
+    lazy_load_libs() # Ensure libs
     # Trigger manual update in background thread (Non-blocking)
     if not CACHE['is_updating']:
         thread = threading.Thread(target=lambda: asyncio.run(update_data()))
@@ -1080,6 +1099,10 @@ def background_task():
     # INCREASED WAIT TIME TO 30s to ensure Cloud Run health check passes first
     print("Background task waiting 30s for Flask to bind port...")
     time.sleep(30)
+    
+    # Lazy load libraries in background thread
+    print(">>> Background thread loading libraries...")
+    lazy_load_libs()
     
     while True:
         print("Running automatic background update...")
