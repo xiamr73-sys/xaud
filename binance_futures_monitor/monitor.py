@@ -351,12 +351,14 @@ async def fetch_data_and_analyze(exchange, symbol, btc_dumping=False, top_10_sym
                 f"{trade_msg}"
             )
 
-            # 推送到 Discord
+            # 推送到 Discord (精简版)
+            # 用户要求: 去除止盈止损、去除状态、去除资金费率
+            # 仅保留核心信息：币种、分数、价格、OI变动
+            
             discord_msg = (
                 f"🚨 **高分报警** {symbol} | Score: {score}\n"
                 f"**价格**: {latest['close']}\n"
-                f"**状态**: {', '.join(tags)}\n"
-                f"{trade_msg}"
+                f"**OI变动**: {oi_change_pct:.2f}%"
             )
             # 异步非阻塞推送
             asyncio.create_task(send_discord_alert(discord_msg))
