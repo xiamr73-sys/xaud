@@ -20,6 +20,9 @@ VERIFY_DELAY = 60 * 60 # 1小时后回测验证 (秒)
 # 记录活跃的验证任务，防止重复: {symbol: timestamp}
 active_verifications = {}
 
+# 记录币种的报警历史 {symbol: {'first_alert_time': timestamp, 'count': 0}}
+alert_history = {}
+
 async def send_discord_alert(content):
     """
     发送 Discord 报警
@@ -351,20 +354,36 @@ async def fetch_data_and_analyze(exchange, symbol, btc_dumping=False, top_10_sym
                 f"{trade_msg}"
             )
 
+            # 触发异步回测任务 (去重：如果该币种已经在回测中，则跳过)
+            current_ts = time.time()
+            
+            # --- 更新报警统计 ---
+            if symbol not in alert_history:
+                alert_history[symbol] = {'first_alert_time': current_ts, 'count': 0}
+            
+            # 增加报警次数
+            alert_history[symbol]['count'] += 1
+            
+            first_time = alert_history[symbol]['first_alert_time']
+            alert_count = alert_history[symbol]['count']
+            
+            # 格式化首次报警时间 (例如: 10:24)
+            first_time_str = pd.to_datetime(first_time, unit='s').strftime('%H:%M')
+            
             # 推送到 Discord (精简版)
             # 用户要求: 去除止盈止损、去除状态、去除资金费率
             # 仅保留核心信息：币种、分数、价格、OI变动
+            # 新增: 首次报警时间、当前报警次数
             
             discord_msg = (
                 f"🚨 **高分报警** {symbol} | Score: {score}\n"
                 f"**价格**: {latest['close']}\n"
-                f"**OI变动**: {oi_change_pct:.2f}%"
+                f"**OI变动**: {oi_change_pct:.2f}%\n"
+                f"**首次报警**: {first_time_str} (第 {alert_count} 次)"
             )
             # 异步非阻塞推送
             asyncio.create_task(send_discord_alert(discord_msg))
 
-            # 触发异步回测任务 (去重：如果该币种已经在回测中，则跳过)
-            current_ts = time.time()
             # 简单的去重逻辑：如果该币种在 VERIFY_DELAY 内已触发过，则不再创建新任务
             # 或者每次触发都创建（如果想看每个信号的表现）
             # 这里为了防止刷屏，限制每个币种在 30 分钟内只追踪一次
