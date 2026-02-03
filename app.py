@@ -443,31 +443,24 @@ def get_sector_fund_flow():
     try:
         # 尝试获取行业资金流向
         df = ak.stock_sector_fund_flow_rank(indicator="今日", sector_type="行业资金流")
+        if df.empty:
+             raise ValueError("Empty data from EM")
+        return df[['序号', '名称', '今日涨跌幅', '主力净流入-净额', '主力净流入-净占比']]
+    except Exception:
+        # Fallback 1: 尝试概念资金流，如果行业不行的话
+        try:
+            df = ak.stock_sector_fund_flow_rank(indicator="今日", sector_type="概念资金流")
+            if not df.empty:
+                return df[['序号', '名称', '今日涨跌幅', '主力净流入-净额', '主力净流入-净占比']]
+        except:
+            pass
+            
+        # Fallback 2: 返回一个空的 DataFrame 结构，而不是 None，方便后续判断
+        # 或者尝试其他接口，例如 ak.stock_individual_fund_flow_rank_jg_eastmoney() 
+        # 但 akshare 对板块资金流的接口比较单一，主要依赖 EM。
         
-        # 字段重命名以更友好显示
-        # 原始字段通常包括: 序号, 名称, 今日涨跌幅, 主力净流入-净额, 主力净流入-净占比, ...
-        # 我们只取关键字段
-        if not df.empty:
-            # 确保数值列是数字类型
-            numeric_cols = ['今日涨跌幅', '主力净流入-净额', '主力净流入-净占比', '超大单净流入-净额', '大单净流入-净额', '中单净流入-净额', '小单净流入-净额']
-            for col in numeric_cols:
-                if col in df.columns:
-                    # 去掉单位等非数字字符并转换 (akshare返回的通常已经是处理过的，但为了保险)
-                    # 这里 akshare 返回的通常是 float 或带单位字符串，视版本而定
-                    # 假设是 float 或可以直接转换
-                    pass
-            
-            # 简单处理单位，如果是以 '万' 或 '亿' 结尾的字符串，需要转换
-            # 目前 akshare 这个接口返回的通常是带单位的字符串或数字
-            # 我们先原样返回，由 dataframe 展示
-            
-            # 排序：默认按主力净流入净额降序
-            # 注意：如果列是字符串，排序可能不准。
-            # 这里先假设 akshare 返回的是易读格式。
-            
-            return df[['序号', '名称', '今日涨跌幅', '主力净流入-净额', '主力净流入-净占比']]
-            
-    except Exception as e:
+        # 最后的手段：构造模拟数据（仅演示用，正式环境不建议，或者显示更友好的错误）
+        # return pd.DataFrame(columns=['序号', '名称', '今日涨跌幅', '主力净流入-净额', '主力净流入-净占比'])
         return None
     return None
 
