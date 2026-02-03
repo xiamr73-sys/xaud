@@ -38,6 +38,7 @@ CACHE = {
     'is_updating': False,
     'last_top_10': set(), # Store last Top 10 symbols to detect new entries
     'seen_coins': set(), # Store ALL coins seen in Top 10 to detect 'First Entry'
+    'btc_status': {'trend': 'NEUTRAL', 'adx': 0}, # Store BTC trend info for frontend
     'market_scan_results': [], # Store analysis for top 200 coins
     'scan_progress': {'current': 0, 'total': 0, 'status': 'idle'}, # Track scanning progress
     'scan_logs': [] # Real-time logs for frontend
@@ -687,6 +688,12 @@ async def update_data():
                         btc_trend = "DOWN"
                 
                 print(f"BTC Trend: {btc_trend} (ADX: {current_adx:.2f})")
+                
+                # Update Cache for Frontend
+                CACHE['btc_status'] = {
+                    'trend': btc_trend,
+                    'adx': float(current_adx)
+                }
             
         except Exception as e:
             print(f"Error analyzing BTC trend: {e}")

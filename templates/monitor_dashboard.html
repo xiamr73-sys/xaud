@@ -72,6 +72,24 @@
             opacity: 0.5;
             cursor: not-allowed;
         }
+        
+        .status-badge-container {
+             display: flex;
+             justify-content: center;
+             gap: 15px;
+             margin-bottom: 20px;
+        }
+        
+        .btc-status {
+             background: rgba(255, 255, 255, 0.05);
+             padding: 5px 15px;
+             border-radius: 20px;
+             font-size: 0.9rem;
+             display: flex;
+             align-items: center;
+             gap: 8px;
+             border: 1px solid rgba(255, 255, 255, 0.1);
+        }
 
         .container {
             display: grid;
@@ -260,6 +278,14 @@
         <a href="/alerts" class="refresh-btn" style="text-decoration: none; border-color: #ff3d00; color: #ff3d00;">⚠️ 查看爆发警报</a>
         <a href="/ai-analysis" class="refresh-btn" style="text-decoration: none; border-color: #2196f3; color: #2196f3;">🤖 AI Analysis</a>
         <a href="/market-predictions" class="refresh-btn" style="text-decoration: none; border-color: #9c27b0; color: #9c27b0;">🔮 Predictions</a>
+    </div>
+
+    <div class="status-badge-container">
+        <div class="btc-status" id="btc-trend-box">
+            <span>BTC 趋势:</span>
+            <span id="btc-trend-val" style="font-weight: bold;">--</span>
+            <span id="btc-adx-val" style="font-size: 0.8em; color: #888;">(ADX: --)</span>
+        </div>
     </div>
 
     <div class="container">
@@ -503,6 +529,37 @@
                     updateTimeAgo();
                 }
                 
+                // Update BTC Trend UI
+                // Note: backend needs to pass this in response.json
+                // Currently API response structure is:
+                // { longs: [], shorts: [], ... }
+                // We should add btc_trend info to the API response in monitor_app.py
+                // For now, let's assume it's there or handle graceful degradation
+                if (data.btc_status) {
+                    const trendEl = document.getElementById('btc-trend-val');
+                    const adxEl = document.getElementById('btc-adx-val');
+                    const boxEl = document.getElementById('btc-trend-box');
+                    
+                    let trendColor = '#aaa';
+                    if (data.btc_status.trend === 'UP') trendColor = '#00e676';
+                    else if (data.btc_status.trend === 'DOWN') trendColor = '#ff1744';
+                    
+                    trendEl.textContent = data.btc_status.trend;
+                    trendEl.style.color = trendColor;
+                    adxEl.textContent = `(ADX: ${formatNumber(data.btc_status.adx)})`;
+                    
+                    if (data.btc_status.trend === 'DOWN') {
+                        boxEl.style.borderColor = '#ff1744';
+                        boxEl.title = "⚠️ BTC 急跌保护中：做多信号已屏蔽";
+                    } else if (data.btc_status.trend === 'UP') {
+                        boxEl.style.borderColor = '#00e676';
+                        boxEl.title = "⚠️ BTC 急涨保护中：做空信号已屏蔽";
+                    } else {
+                        boxEl.style.borderColor = 'rgba(255,255,255,0.1)';
+                        boxEl.title = "";
+                    }
+                }
+
                 const longsContainer = document.getElementById('longs-list');
                 // Only update DOM if not updating (or partial update? no, just update)
                 // We persist expanded cards so it's safe to overwrite innerHTML
