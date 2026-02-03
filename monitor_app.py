@@ -805,8 +805,8 @@ async def update_data():
                     signal_icon = "⚪"
                     signal_text = "NEUTRAL"
                 
-                # Format: ⚡ **评分飙升**: {symbol} | 信号: {icon} {text} | 价格: {price} | 分数: {prev}->{current}
-                riser_msg.append(f"⚡ **评分飙升**: {display_symbol} | 信号: {signal_icon} {signal_text} | 价格: {r['price']} | 分数: {r['prev']:.1f}➔{r['current']:.1f} (+{r['delta']:.1f})")
+                # Format: ✨ **发现新星**: {symbol} | 信号: {icon} {text} | 价格: {price} | 分数: {prev}->{current}
+                riser_msg.append(f"✨ **发现新星**: {display_symbol} | 信号: {signal_icon} {signal_text} | 价格: {r['price']} | 分数: {r['prev']:.1f}➔{r['current']:.1f} (+{r['delta']:.1f})")
             
             alert_content = "\n".join(riser_msg)
             target_url = DISCORD_WEBHOOK_FIRST_ENTRY or DISCORD_WEBHOOK_GENERAL
@@ -1158,7 +1158,7 @@ def test_score_jump():
                 signal_icon = "⚪"
                 signal_text = "NEUTRAL"
             
-            riser_msg.append(f"⚡ **评分飙升**: {display_symbol} | 信号: {signal_icon} {signal_text} | 价格: {r['price']} | 分数: {r['prev']:.1f}➔{r['current']:.1f} (+{r['delta']:.1f})")
+            riser_msg.append(f"✨ **发现新星**: {display_symbol} | 信号: {signal_icon} {signal_text} | 价格: {r['price']} | 分数: {r['prev']:.1f}➔{r['current']:.1f} (+{r['delta']:.1f})")
         
         alert_content = "\n".join(riser_msg)
         # Force use GENERAL or FIRST_ENTRY if available
