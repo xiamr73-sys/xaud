@@ -57,7 +57,8 @@ CACHE = {
     'btc_status': {'trend': 'NEUTRAL', 'adx': 0}, # Store BTC trend info for frontend
     'market_scan_results': [], # Store analysis for top 200 coins
     'scan_progress': {'current': 0, 'total': 0, 'status': 'idle'}, # Track scanning progress
-    'scan_logs': [] # Real-time logs for frontend
+    'scan_logs': [], # Real-time logs for frontend
+    'previous_scores': {} # Store previous trend scores to detect rapid increases
 }
 
 # --- Signal Backtest Storage ---
@@ -754,112 +755,98 @@ async def update_data():
         
         # Update Cache
         CACHE['last_top_10'] = current_top_10_symbols
+        
+        # --- Rapid Score Increase Detection (Top 100) ---
+        rapid_risers = []
+        SCORE_JUMP_THRESHOLD = 10.0 # Points increase to trigger alert
+        
+        # Check Top 100 by volume (which corresponds to first 100 in all_analysis_results)
+        top_100_coins = all_analysis_results[:100]
+        
+        for item in top_100_coins:
+            symbol = item['symbol']
+            current_score = item.get('trend_score', 0)
+            
+            # Get previous score
+            prev_score = CACHE['previous_scores'].get(symbol)
+            
+            if prev_score is not None:
+                score_delta = current_score - prev_score
+                if score_delta >= SCORE_JUMP_THRESHOLD:
+                    rapid_risers.append({
+                        'symbol': symbol,
+                        'current': current_score,
+                        'prev': prev_score,
+                        'delta': score_delta,
+                        'price': item['close']
+                    })
+        
+        # Update previous scores for NEXT run (store all analyzed coins)
+        new_scores = {}
+        for item in all_analysis_results:
+            new_scores[item['symbol']] = item.get('trend_score', 0)
+        CACHE['previous_scores'] = new_scores
+        
+        # Send Alert for Rapid Risers
+        if rapid_risers:
+            riser_msg = ["⚡ **评分飙升提醒 (Top 100)**"]
+            for r in rapid_risers:
+                display_symbol = r['symbol'].split(':')[0] if ':' in r['symbol'] else r['symbol']
+                riser_msg.append(f"• **{display_symbol}**: {r['prev']:.1f} ➔ {r['current']:.1f} (+{r['delta']:.1f}) | 价格: {r['price']}")
+            
+            alert_content = "\n".join(riser_msg)
+            target_url = DISCORD_WEBHOOK_FIRST_ENTRY or DISCORD_WEBHOOK_GENERAL
+            send_discord_alert(alert_content, webhook_url=target_url)
         # -----------------------------------
 
         # --- Send Discord Summary Report ---
         discord_report = []
         
-        # Process Longs (Only if BTC is NOT crashing)
-        if btc_trend != "DOWN":
-            for item in CACHE['longs']: # Use sorted Top 3 Longs
+        # Section 1: Top 3 STRONG LONGs (Score)
+        if btc_trend != "DOWN" and CACHE['longs']:
+            discord_report.append("🚀 **Top 3 STRONG LONGs (Score)**")
+            for item in CACHE['longs']: 
                 symbol = item['symbol']
-                # Track alert to prevent spamming (limit 1 per hour per coin)
-                last_sent = CACHE['discord_sent'].get(symbol, 0)
-                if time.time() - last_sent > 3600:
-                    icon = "🟢"
-                    # Clean symbol format (e.g., BTC/USDT:USDT -> BTC/USDT)
-                    display_symbol = symbol.split(':')[0] if ':' in symbol else symbol
-                    discord_report.append(f"{icon} **{display_symbol}** | Price: {item['close']} | Score: {item.get('trend_score', 0):.1f}")
-                    CACHE['discord_sent'][symbol] = time.time()
-                    
-                    # --- Record for Backtest ---
-                    with BACKTEST_LOCK:
-                        signal_id = f"{symbol}_{int(time.time())}"
-                        BACKTEST_SIGNALS[signal_id] = {
-                            'symbol': symbol,
-                            'type': 'LONG',
-                            'entry_price': float(item['close']),
-                            'entry_time': time.time(),
-                            'oi_growth': float(item['open_interest_change'])
-                        }
-                    # ---------------------------
-        else:
-            print("BTC is dumping! Suppressing LONG alerts.")
+                display_symbol = symbol.split(':')[0] if ':' in symbol else symbol
+                adx_val = f"{item['adx']:.1f}" if 'adx' in item else "N/A"
+                discord_report.append(f"• **{display_symbol}** | Price: {item['close']} | Score: {item.get('trend_score', 0):.1f} | ADX: {adx_val}")
+            discord_report.append("") # Empty line separator
 
-        # Process Shorts (Only if BTC is NOT mooning)
-        if btc_trend != "UP":
-            for item in CACHE['shorts']: # Use sorted Top 3 Shorts
+        # Section 2: Top 3 STRONG SHORTs (Score)
+        if btc_trend != "UP" and CACHE['shorts']:
+            discord_report.append("🔻 **Top 3 STRONG SHORTs (Score)**")
+            for item in CACHE['shorts']:
                 symbol = item['symbol']
-                last_sent = CACHE['discord_sent'].get(symbol, 0)
-                if time.time() - last_sent > 3600:
-                    icon = "🔴"
-                    # Clean symbol format
-                    display_symbol = symbol.split(':')[0] if ':' in symbol else symbol
-                    discord_report.append(f"{icon} **{display_symbol}** | Price: {item['close']} | Score: {item.get('trend_score', 0):.1f}")
-                    CACHE['discord_sent'][symbol] = time.time()
-
-                    # --- Record for Backtest ---
-                    with BACKTEST_LOCK:
-                        signal_id = f"{symbol}_{int(time.time())}"
-                        BACKTEST_SIGNALS[signal_id] = {
-                            'symbol': symbol,
-                            'type': 'SHORT',
-                            'entry_price': float(item['close']),
-                            'entry_time': time.time(),
-                            'oi_growth': float(item['open_interest_change'])
-                        }
-                    # ---------------------------
-        else:
-            print("BTC is pumping! Suppressing SHORT alerts.")
-
-        # Process High ADX Signals (Apply same BTC filter)
-        # We need to iterate over ADX lists
-        for item in CACHE['adx_longs']:
-            symbol = item['symbol']
-            if btc_trend == "DOWN": continue
-            
-            last_sent = CACHE['discord_sent'].get(symbol, 0)
-            if time.time() - last_sent > 3600:
-                icon = "🔥" 
                 display_symbol = symbol.split(':')[0] if ':' in symbol else symbol
-                discord_report.append(f"{icon} **{display_symbol}** (High ADX) | Trend: {item['trend']} | Price: {item['close']}")
-                CACHE['discord_sent'][symbol] = time.time()
+                adx_val = f"{item['adx']:.1f}" if 'adx' in item else "N/A"
+                discord_report.append(f"• **{display_symbol}** | Price: {item['close']} | Score: {item.get('trend_score', 0):.1f} | ADX: {adx_val}")
+            discord_report.append("")
 
-                with BACKTEST_LOCK:
-                    signal_id = f"{symbol}_{int(time.time())}"
-                    BACKTEST_SIGNALS[signal_id] = {
-                        'symbol': symbol,
-                        'type': 'LONG',
-                        'entry_price': float(item['close']),
-                        'entry_time': time.time(),
-                        'oi_growth': float(item['open_interest_change'])
-                    }
-        
-        for item in CACHE['adx_shorts']:
-            symbol = item['symbol']
-            if btc_trend == "UP": continue
-            
-            last_sent = CACHE['discord_sent'].get(symbol, 0)
-            if time.time() - last_sent > 3600:
-                icon = "❄️" 
+        # Section 3: Top 3 High ADX LONGs
+        if btc_trend != "DOWN" and CACHE['adx_longs']:
+            discord_report.append("🔥 **Top 3 High ADX LONGs**")
+            for item in CACHE['adx_longs']:
+                symbol = item['symbol']
                 display_symbol = symbol.split(':')[0] if ':' in symbol else symbol
-                discord_report.append(f"{icon} **{display_symbol}** (High ADX) | Trend: {item['trend']} | Price: {item['close']}")
-                CACHE['discord_sent'][symbol] = time.time()
+                adx_val = f"{item['adx']:.1f}" if 'adx' in item else "N/A"
+                discord_report.append(f"• **{display_symbol}** | Price: {item['close']} | ADX: {adx_val}")
+            discord_report.append("")
 
-                with BACKTEST_LOCK:
-                    signal_id = f"{symbol}_{int(time.time())}"
-                    BACKTEST_SIGNALS[signal_id] = {
-                        'symbol': symbol,
-                        'type': 'SHORT',
-                        'entry_price': float(item['close']),
-                        'entry_time': time.time(),
-                        'oi_growth': float(item['open_interest_change'])
-                    }
+        # Section 4: Top 3 High ADX SHORTs
+        if btc_trend != "UP" and CACHE['adx_shorts']:
+            discord_report.append("❄️ **Top 3 High ADX SHORTs**")
+            for item in CACHE['adx_shorts']:
+                symbol = item['symbol']
+                display_symbol = symbol.split(':')[0] if ':' in symbol else symbol
+                adx_val = f"{item['adx']:.1f}" if 'adx' in item else "N/A"
+                discord_report.append(f"• **{display_symbol}** | Price: {item['close']} | ADX: {adx_val}")
+            discord_report.append("")
                 
         # Only send if there are reports
         if discord_report:
             summary_msg = "\n".join(discord_report)
-            summary_msg = f"📊 **Market Update ({time.strftime('%H:%M:%S')})**\n{summary_msg}"
+            # Add header
+            summary_msg = f"📊 **Market Update ({time.strftime('%H:%M:%S')})**\n\n{summary_msg}"
             send_discord_alert(summary_msg, webhook_url=DISCORD_WEBHOOK_GENERAL)
         # -----------------------------------
         
@@ -1035,23 +1022,125 @@ def get_data():
     response.headers.add('Access-Control-Allow-Origin', '*')
     return response
 
-@app.route('/api/test_first_entry')
-def test_first_entry():
+@app.route('/api/test_market_update')
+def test_market_update():
     """
-    Simulate a 'First Entry' event to verify Discord First Entry Webhook.
+    Generate a fake Market Update report to test Discord formatting.
+    Does NOT use real data, just verifies the layout.
     """
-    if not DISCORD_WEBHOOK_FIRST_ENTRY:
-        return jsonify({'status': 'error', 'message': 'First Entry Webhook not configured'}), 400
-        
-    fake_symbol = "TEST-COIN"
-    fake_price = 123.45
-    msg = f"✨ **[TEST] 发现新潜力股！** {fake_symbol} 首次杀入前十 | 信号: 🟢 LONG | 价格: {fake_price}"
+    fake_longs = [
+        {'symbol': 'MERL/USDT:USDT', 'close': 0.05878, 'trend_score': 31.7, 'adx': 33.4},
+        {'symbol': '1000SATS/USDT:USDT', 'close': 0.0000138, 'trend_score': 25.1, 'adx': 33.8},
+        {'symbol': 'ARC/USDT:USDT', 'close': 0.05919, 'trend_score': 23.1, 'adx': 47.1}
+    ]
+    fake_shorts = [
+        {'symbol': 'COLLECT/USDT:USDT', 'close': 0.02943, 'trend_score': 20.0, 'adx': 41.8},
+        {'symbol': 'KITE/USDT:USDT', 'close': 0.14106, 'trend_score': 18.1, 'adx': 39.1},
+        {'symbol': 'GIGGLE/USDT:USDT', 'close': 35.5, 'trend_score': 13.4, 'adx': 28.9}
+    ]
     
-    try:
-        send_discord_alert(msg, webhook_url=DISCORD_WEBHOOK_FIRST_ENTRY)
-        return jsonify({'status': 'success', 'message': 'Test alert sent to First Entry Webhook'})
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+    discord_report = []
+    
+    # 1. Longs
+    discord_report.append("🚀 **Top 3 STRONG LONGs (Score)**")
+    for item in fake_longs:
+        symbol = item['symbol']
+        display_symbol = symbol.split(':')[0] if ':' in symbol else symbol
+        discord_report.append(f"• **{display_symbol}** | Price: {item['close']} | Score: {item['trend_score']} | ADX: {item['adx']}")
+    discord_report.append("")
+
+    # 2. Shorts
+    discord_report.append("🔻 **Top 3 STRONG SHORTs (Score)**")
+    for item in fake_shorts:
+        symbol = item['symbol']
+        display_symbol = symbol.split(':')[0] if ':' in symbol else symbol
+        discord_report.append(f"• **{display_symbol}** | Price: {item['close']} | Score: {item['trend_score']} | ADX: {item['adx']}")
+    discord_report.append("")
+
+    # 3. High ADX Longs (Reuse fake longs for demo)
+    discord_report.append("🔥 **Top 3 High ADX LONGs**")
+    for item in fake_longs:
+        symbol = item['symbol']
+        display_symbol = symbol.split(':')[0] if ':' in symbol else symbol
+        discord_report.append(f"• **{display_symbol}** | Price: {item['close']} | ADX: {item['adx']}")
+    discord_report.append("")
+
+    # 4. High ADX Shorts (Reuse fake shorts for demo)
+    discord_report.append("❄️ **Top 3 High ADX SHORTs**")
+    for item in fake_shorts:
+        symbol = item['symbol']
+        display_symbol = symbol.split(':')[0] if ':' in symbol else symbol
+        discord_report.append(f"• **{display_symbol}** | Price: {item['close']} | ADX: {item['adx']}")
+    discord_report.append("")
+
+    summary_msg = "\n".join(discord_report)
+    summary_msg = f"📊 **Market Update (TEST MODE)**\n\n{summary_msg}"
+    
+    send_discord_alert(summary_msg, webhook_url=DISCORD_WEBHOOK_GENERAL)
+    return jsonify({'status': 'success', 'message': 'Test report sent'})
+
+@app.route('/api/test_score_jump')
+def test_score_jump():
+    """
+    Simulate a rapid score increase to test the alert.
+    """
+    # 1. Setup Fake Previous Scores
+    CACHE['previous_scores'] = {
+        'BTC/USDT': 10.0,
+        'ETH/USDT': 20.0,
+        'SOL/USDT': 15.0
+    }
+    
+    # 2. Setup Fake Current Results (Top 100)
+    # BTC jumps +15 (Trigger), ETH +2 (No Trigger), SOL +5 (No Trigger)
+    fake_results = [
+        {'symbol': 'BTC/USDT', 'trend_score': 25.0, 'close': 60000}, # +15
+        {'symbol': 'ETH/USDT', 'trend_score': 22.0, 'close': 3000},  # +2
+        {'symbol': 'SOL/USDT', 'trend_score': 20.0, 'close': 100},   # +5
+    ]
+    # Fill the rest to simulate top 100
+    for i in range(97):
+        fake_results.append({'symbol': f'COIN_{i}', 'trend_score': 10.0, 'close': 1.0})
+        
+    # 3. Run Logic (Copied from update_data)
+    rapid_risers = []
+    SCORE_JUMP_THRESHOLD = 10.0
+    
+    top_100_coins = fake_results[:100]
+    
+    for item in top_100_coins:
+        symbol = item['symbol']
+        current_score = item.get('trend_score', 0)
+        
+        # Get previous score
+        prev_score = CACHE['previous_scores'].get(symbol)
+        
+        if prev_score is not None:
+            score_delta = current_score - prev_score
+            if score_delta >= SCORE_JUMP_THRESHOLD:
+                rapid_risers.append({
+                    'symbol': symbol,
+                    'current': current_score,
+                    'prev': prev_score,
+                    'delta': score_delta,
+                    'price': item['close']
+                })
+    
+    # 4. Send Alert
+    if rapid_risers:
+        riser_msg = ["⚡ **评分飙升提醒 (Top 100) [TEST]**"]
+        for r in rapid_risers:
+            display_symbol = r['symbol'].split(':')[0] if ':' in r['symbol'] else r['symbol']
+            riser_msg.append(f"• **{display_symbol}**: {r['prev']:.1f} ➔ {r['current']:.1f} (+{r['delta']:.1f}) | 价格: {r['price']}")
+        
+        alert_content = "\n".join(riser_msg)
+        # Force use GENERAL or FIRST_ENTRY if available
+        target_url = DISCORD_WEBHOOK_FIRST_ENTRY or DISCORD_WEBHOOK_GENERAL
+        send_discord_alert(alert_content, webhook_url=target_url)
+        
+        return jsonify({'status': 'success', 'message': 'Score jump alert sent', 'risers': rapid_risers})
+    
+    return jsonify({'status': 'no_change', 'message': 'No score jumps detected'})
 
 @app.route('/api/test_backtest')
 def test_backtest():
