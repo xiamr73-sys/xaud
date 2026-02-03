@@ -235,7 +235,7 @@ async def init_app():
 
 if __name__ == '__main__':
     # 运行 Web 服务器
-    # 获取端口 (适配云环境，默认使用 5001)
-    port = int(os.environ.get('PORT', 5001))
+    # 获取端口 (适配 Cloud Run，默认使用 8080)
+    port = int(os.environ.get('PORT', 8080))
     print(f"启动 Web 看板: http://0.0.0.0:{port}", flush=True)
     web.run_app(init_app(), host='0.0.0.0', port=port)

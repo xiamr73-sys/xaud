@@ -9,5 +9,5 @@ python3 binance_futures_monitor/monitor.py &
 
 # 启动 Web 服务器 (前台运行)
 # 使用 exec 让 web server 成为主进程，接收系统信号 (如 SIGTERM)
-echo "Starting Web Server..."
+echo "Starting Web Server on PORT=${PORT:-8080}..."
 exec python3 binance_futures_monitor/web_server.py

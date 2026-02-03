@@ -21,10 +21,11 @@ RUN chmod +x start.sh
 
 # 设置环境变量
 ENV PYTHONUNBUFFERED=1
-ENV PORT=5001
+# Cloud Run 默认使用 8080，如果未设置则默认为 8080
+ENV PORT=8080
 
-# 暴露端口
-EXPOSE 5001
+# 暴露端口 (仅作为文档，不强制绑定)
+EXPOSE 8080
 
 # 启动脚本
 CMD ["./start.sh"]
