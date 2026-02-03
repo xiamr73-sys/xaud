@@ -1077,8 +1077,9 @@ def background_task():
     Designed for Google Cloud Run with --no-cpu-throttling.
     """
     # Wait for Flask to start serving requests before consuming CPU
-    print("Background task waiting 10s for Flask to bind port...")
-    time.sleep(10)
+    # INCREASED WAIT TIME TO 30s to ensure Cloud Run health check passes first
+    print("Background task waiting 30s for Flask to bind port...")
+    time.sleep(30)
     
     while True:
         print("Running automatic background update...")
@@ -1090,15 +1091,20 @@ def background_task():
         time.sleep(300)
 
 if __name__ == '__main__':
+    print(">>> SYSTEM STARTUP INITIATED <<<")
+    
     # Start background thread for automatic updates
     # This works perfectly on Google Cloud Run with CPU allocation enabled
     t = threading.Thread(target=background_task)
     t.daemon = True
     t.start()
+    print(">>> Background task thread started (delayed)")
     
     # Define startup notification function to run in background
     # This prevents network requests from blocking the main thread during startup
     def send_startup_notification():
+        # Wait a bit before sending notification to ensure network is ready
+        time.sleep(5)
         print(f"DEBUG: General Webhook configured: {bool(DISCORD_WEBHOOK_GENERAL)}")
         if DISCORD_WEBHOOK_GENERAL:
             try:
@@ -1109,11 +1115,20 @@ if __name__ == '__main__':
 
     # Start notification thread
     threading.Thread(target=send_startup_notification, daemon=True).start()
+    print(">>> Notification thread started")
     
     # Default port should be 5001 if not set, but Cloud Run passes PORT env var
     # If locally running without PORT set, default to 5001 to match user preference
-    port = int(os.environ.get('PORT', 5001)) 
+    try:
+        port_str = os.environ.get('PORT', '5001')
+        port = int(port_str)
+        print(f">>> PORT configured: {port} (Env: {port_str})")
+    except ValueError:
+        print(f">>> ERROR: Invalid PORT environment variable: {os.environ.get('PORT')}. Defaulting to 5001.")
+        port = 5001
+        
     debug = os.environ.get('FLASK_ENV') == 'development'
     
-    print(f"Starting server on port {port}...")
+    print(f">>> Starting Flask Server on 0.0.0.0:{port}...")
+    # FLASK RUN
     app.run(host='0.0.0.0', port=port, debug=debug, use_reloader=False)
