@@ -501,15 +501,7 @@ def get_sector_fund_flow():
 
 
 
-def run_backtest_logic(days_lookback, sample_size, progress_bar, status_text):
-    try:
-        hs300 = ak.index_stock_cons(symbol="000300")
-        stock_list = hs300[['stock_code', 'stock_name']]
-        stock_list.columns = ['code', 'name']
-        stock_list = stock_list.head(sample_size)
-    except Exception:
-        stock_list = ak.stock_info_a_code_name().head(sample_size)
-
+def run_backtest_logic(days_lookback, stock_list, progress_bar, status_text):
     stats = {
         "综合策略": {"signals": 0, "wins": 0, "total_return": 0.0},
         "老鸭头": {"signals": 0, "wins": 0, "total_return": 0.0},
@@ -527,19 +519,49 @@ def run_backtest_logic(days_lookback, sample_size, progress_bar, status_text):
         status_text.text(f"回测中: {symbol} {row['name']}")
         
         try:
-            df = get_stock_data(symbol)
-            if df.empty or len(df) < 60: continue
+            # 获取数据，这里也需要增强鲁棒性
+            df = None
+            try:
+                df = ak.stock_zh_a_hist(symbol=symbol, start_date=start_date, end_date=end_date, adjust="qfq")
+            except:
+                df = None
             
-            # df.columns = ['date', 'open', 'close', 'high', 'low', 'volume', 'amount', 'amplitude', 'pct_chg', 'change', 'turnover']
+            if df is None or df.empty:
+                 df = get_stock_data(symbol) # Fallback (注意 get_stock_data 默认没有日期筛选，可能需要截取)
+                 
+            if df is None or df.empty or len(df) < 60: continue
             
+            # 确保日期列
+            if 'date' in df.columns:
+                df['date'] = pd.to_datetime(df['date'])
+            elif len(df.columns) > 0: # 尝试推断
+                 # 假设第一列是日期
+                 pass # 这里简化处理，如果 fallback 到 get_stock_data，通常会有标准列名
+            
+            # 重新标准化列名 (以防万一)
+            # ... (省略重复代码，假定数据源返回标准格式)
+            if 'open' not in df.columns: # 简单检查
+                 # 尝试适配列名
+                 if len(df.columns) == 11:
+                     df.columns = ['date', 'open', 'close', 'high', 'low', 'volume', 'amount', 'amplitude', 'pct_chg', 'change', 'turnover']
+                 elif len(df.columns) >= 9:
+                     if 'open' not in df.columns:
+                         df.columns = ['date', 'open', 'high', 'low', 'close', 'volume', 'amount', 'turnover', 'pct_chg'][:len(df.columns)]
+
             df['ma5'] = df['close'].rolling(window=5).mean()
             df['ma10'] = df['close'].rolling(window=10).mean()
             df['ma20'] = df['close'].rolling(window=20).mean()
             df['ma60'] = df['close'].rolling(window=60).mean()
             df = strategies.calculate_kdj(df)
             
-            analysis_start_idx = len(df) - days_lookback
-            if analysis_start_idx < 60: analysis_start_idx = 60
+            # 筛选出回测窗口内的数据
+            # 注意：akshare hist 返回的数据已经是指定日期范围的了
+            # 如果是 fallback 获取的全量数据，需要截取
+            if len(df) > days_lookback + 60:
+                 # 简单截取
+                 df = df.iloc[-(days_lookback + 60):]
+            
+            analysis_start_idx = 60 # 从第 60 天开始分析 (给均线留出空间)
             
             for i in range(analysis_start_idx, len(df) - 5):
                 current_df = df.iloc[:i+1]
@@ -585,7 +607,7 @@ st.markdown("基于技术指标和经典K线形态的自动化扫描工具")
 # 侧边栏
 with st.sidebar:
     st.header("功能选择")
-    app_mode = st.radio("选择模式", ["K线扫描", "策略回测", "情绪监控", "板块资金看板", "缠论分析"])
+    app_mode = st.radio("选择模式", ["K线扫描", "策略回测", "情绪监控", "板块资金看板"])
     
     st.markdown("---")
     st.markdown("### 关于")
@@ -687,19 +709,56 @@ if app_mode == "K线扫描":
 
 elif app_mode == "策略回测":
     st.header("🔙 策略回测")
-    st.info("使用沪深300成分股作为样本，测试过去一段时间的策略表现。")
+    st.info("可以自由选择板块或输入特定股票代码进行回测。")
     
     col1, col2 = st.columns(2)
     with col1:
-        lookback = st.slider("回测天数", 30, 180, 90)
+        lookback = st.slider("回测天数", 30, 365, 90)
     with col2:
-        sample_size = st.slider("样本数量 (只)", 10, 300, 50)
+        # 回测范围选择
+        backtest_mode = st.radio("回测范围", ["沪深300 (默认)", "自定义板块", "单只股票"])
         
-    if st.button("开始回测", type="primary"):
+    stock_list_backtest = None
+    
+    if backtest_mode == "沪深300 (默认)":
+        sample_size = st.slider("样本数量 (前N只)", 10, 300, 50)
+        if st.button("开始回测", type="primary"):
+            try:
+                hs300 = ak.index_stock_cons(symbol="000300")
+                stock_list_backtest = hs300[['stock_code', 'stock_name']]
+                stock_list_backtest.columns = ['code', 'name']
+                stock_list_backtest = stock_list_backtest.head(sample_size)
+            except:
+                st.warning("获取沪深300失败，使用全市场前50只")
+                stock_list_backtest = ak.stock_info_a_code_name().head(sample_size)
+                
+    elif backtest_mode == "自定义板块":
+        sector_list = get_sector_list()
+        selected_sector_bt = st.selectbox("选择板块", sector_list)
+        if st.button("开始回测", type="primary"):
+            with st.spinner(f"获取 {selected_sector_bt} 成分股..."):
+                stocks, msg = get_sector_stocks(selected_sector_bt)
+                if stocks is not None:
+                    stock_list_backtest = stocks
+                else:
+                    st.error(msg)
+                    
+    elif backtest_mode == "单只股票":
+        single_stock = st.text_input("输入代码 (如 600519)", "600519")
+        if st.button("开始回测", type="primary"):
+            try:
+                # 简单构造一个单行 dataframe
+                name = "未知"
+                # 尝试获取名称 (可选)
+                stock_list_backtest = pd.DataFrame([{'code': single_stock, 'name': name}])
+            except:
+                pass
+
+    if stock_list_backtest is not None:
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        stats = run_backtest_logic(lookback, sample_size, progress_bar, status_text)
+        stats = run_backtest_logic(lookback, stock_list_backtest, progress_bar, status_text)
         
         progress_bar.progress(100)
         status_text.text("回测完成")
@@ -820,11 +879,17 @@ elif app_mode == "板块资金看板":
                 st.info("提示：点击表头可以进行排序。红色代表资金流入/上涨，绿色代表资金流出/下跌。")
                 
             else:
-                st.warning("暂未获取到板块资金流向数据，可能是接口访问受限或非交易时间。")
+                # 即使失败了，也要显示一个友好的空表格或提示，而不是完全空白
+                st.warning("暂未获取到板块资金流向数据。")
+                
+                # 再次尝试手动获取并显示调试信息 (仅供管理员看，或简化提示)
+                # Fallback to concept if industry failed silently
                 st.markdown("""
                 **可能的原因：**
-                1. 东方财富接口反爬虫限制（云端常见）。
+                1. 东方财富/同花顺接口反爬虫限制（云端常见）。
                 2. 当前非交易时间，数据未更新。
+                
+                *系统将自动尝试切换数据源，请稍后刷新重试。*
                 """)
 
 elif app_mode == "缠论分析":
