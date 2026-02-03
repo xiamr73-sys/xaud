@@ -778,7 +778,8 @@ async def update_data():
                         'current': current_score,
                         'prev': prev_score,
                         'delta': score_delta,
-                        'price': item['close']
+                        'price': item['close'],
+                        'trend': item.get('trend', 'NEUTRAL')
                     })
         
         # Update previous scores for NEXT run (store all analyzed coins)
@@ -789,10 +790,23 @@ async def update_data():
         
         # Send Alert for Rapid Risers
         if rapid_risers:
-            riser_msg = ["⚡ **评分飙升提醒 (Top 100)**"]
+            riser_msg = []
             for r in rapid_risers:
                 display_symbol = r['symbol'].split(':')[0] if ':' in r['symbol'] else r['symbol']
-                riser_msg.append(f"• **{display_symbol}**: {r['prev']:.1f} ➔ {r['current']:.1f} (+{r['delta']:.1f}) | 价格: {r['price']}")
+                
+                # Determine Signal Icon/Text
+                if r['trend'] == 'STRONG_LONG':
+                    signal_icon = "🟢"
+                    signal_text = "LONG"
+                elif r['trend'] == 'STRONG_SHORT':
+                    signal_icon = "🔴"
+                    signal_text = "SHORT"
+                else:
+                    signal_icon = "⚪"
+                    signal_text = "NEUTRAL"
+                
+                # Format: ⚡ **评分飙升**: {symbol} | 信号: {icon} {text} | 价格: {price} | 分数: {prev}->{current}
+                riser_msg.append(f"⚡ **评分飙升**: {display_symbol} | 信号: {signal_icon} {signal_text} | 价格: {r['price']} | 分数: {r['prev']:.1f}➔{r['current']:.1f} (+{r['delta']:.1f})")
             
             alert_content = "\n".join(riser_msg)
             target_url = DISCORD_WEBHOOK_FIRST_ENTRY or DISCORD_WEBHOOK_GENERAL
@@ -1094,13 +1108,13 @@ def test_score_jump():
     # 2. Setup Fake Current Results (Top 100)
     # BTC jumps +15 (Trigger), ETH +2 (No Trigger), SOL +5 (No Trigger)
     fake_results = [
-        {'symbol': 'BTC/USDT', 'trend_score': 25.0, 'close': 60000}, # +15
-        {'symbol': 'ETH/USDT', 'trend_score': 22.0, 'close': 3000},  # +2
-        {'symbol': 'SOL/USDT', 'trend_score': 20.0, 'close': 100},   # +5
+        {'symbol': 'BTC/USDT', 'trend_score': 25.0, 'close': 60000, 'trend': 'STRONG_LONG'}, # +15
+        {'symbol': 'ETH/USDT', 'trend_score': 22.0, 'close': 3000, 'trend': 'NEUTRAL'},  # +2
+        {'symbol': 'SOL/USDT', 'trend_score': 20.0, 'close': 100, 'trend': 'STRONG_SHORT'},   # +5
     ]
     # Fill the rest to simulate top 100
     for i in range(97):
-        fake_results.append({'symbol': f'COIN_{i}', 'trend_score': 10.0, 'close': 1.0})
+        fake_results.append({'symbol': f'COIN_{i}', 'trend_score': 10.0, 'close': 1.0, 'trend': 'NEUTRAL'})
         
     # 3. Run Logic (Copied from update_data)
     rapid_risers = []
@@ -1123,15 +1137,28 @@ def test_score_jump():
                     'current': current_score,
                     'prev': prev_score,
                     'delta': score_delta,
-                    'price': item['close']
+                    'price': item['close'],
+                    'trend': item.get('trend', 'NEUTRAL')
                 })
     
     # 4. Send Alert
     if rapid_risers:
-        riser_msg = ["⚡ **评分飙升提醒 (Top 100) [TEST]**"]
+        riser_msg = []
         for r in rapid_risers:
             display_symbol = r['symbol'].split(':')[0] if ':' in r['symbol'] else r['symbol']
-            riser_msg.append(f"• **{display_symbol}**: {r['prev']:.1f} ➔ {r['current']:.1f} (+{r['delta']:.1f}) | 价格: {r['price']}")
+            
+            # Determine Signal Icon/Text
+            if r['trend'] == 'STRONG_LONG':
+                signal_icon = "🟢"
+                signal_text = "LONG"
+            elif r['trend'] == 'STRONG_SHORT':
+                signal_icon = "🔴"
+                signal_text = "SHORT"
+            else:
+                signal_icon = "⚪"
+                signal_text = "NEUTRAL"
+            
+            riser_msg.append(f"⚡ **评分飙升**: {display_symbol} | 信号: {signal_icon} {signal_text} | 价格: {r['price']} | 分数: {r['prev']:.1f}➔{r['current']:.1f} (+{r['delta']:.1f})")
         
         alert_content = "\n".join(riser_msg)
         # Force use GENERAL or FIRST_ENTRY if available
