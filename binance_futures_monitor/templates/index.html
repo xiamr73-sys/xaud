@@ -10,8 +10,9 @@
         .card { border: none; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }
         .card-header { background-color: #fff; border-bottom: 1px solid #eee; font-weight: 600; }
         .log-box { height: 400px; overflow-y: scroll; background-color: #1e1e1e; color: #d4d4d4; padding: 15px; font-family: 'Consolas', 'Monaco', monospace; font-size: 0.9rem; border-radius: 4px; }
-        .alert-card { border-left: 5px solid #dc3545; transition: transform 0.2s; }
+        .alert-card { border-left: 5px solid #dc3545; transition: transform 0.2s; cursor: pointer; }
         .alert-card:hover { transform: translateY(-2px); }
+        .alert-card.no-hover { transform: none !important; }
         .score-badge { font-size: 1.2rem; font-weight: bold; }
         .status-badge { font-size: 0.8rem; margin-right: 5px; }
         .refresh-spin { animation: spin 1s linear infinite; }
@@ -288,7 +289,10 @@
                             }
 
                             html += `
-                                <div class="card alert-card mb-3 ${stickyClass}" ${isObvTrend ? 'style="background-color: #fffbf0;"' : ''}>
+                                <div class="card alert-card mb-3 ${stickyClass}" 
+                                     ${isObvTrend ? 'style="background-color: #fffbf0;"' : ''}
+                                     onclick="this.classList.add('no-hover')"
+                                     onmouseleave="this.classList.remove('no-hover')">
                                     <div class="card-header d-flex justify-content-between align-items-center bg-white">
                                         <div>
                                             <span class="h5 mb-0 me-2">${symbol}</span>
