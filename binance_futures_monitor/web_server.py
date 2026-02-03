@@ -9,8 +9,14 @@ import jinja2
 # 配置路径
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(BASE_DIR, 'templates')
-LOG_FILE = "monitor.log"
-ALERTS_FILE = "alerts_history.log"
+
+# Cloud Run / Docker 环境下，日志应该写在 /tmp 或者直接 stdout
+# 优先检查 /tmp 下是否有日志，如果没有再尝试当前目录 (兼容本地开发)
+LOG_FILE = "/tmp/monitor.log" if os.path.exists("/tmp/monitor.log") else "monitor.log"
+ALERTS_FILE = "/tmp/alerts_history.log"
+# 如果 /tmp 下没有 alerts_history.log，但当前目录有，则用当前目录的 (本地开发兼容)
+if not os.path.exists(ALERTS_FILE) and os.path.exists("alerts_history.log"):
+    ALERTS_FILE = "alerts_history.log"
 
 def read_last_lines(file_path, n=50):
     """读取文件最后 n 行"""

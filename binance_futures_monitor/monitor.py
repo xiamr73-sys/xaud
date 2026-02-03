@@ -387,10 +387,10 @@ async def main():
     """
     主程序入口
     """
-    # 1. 普通日志
-    logger.add("monitor.log", rotation="1 day", encoding="utf-8")
+    # 1. 普通日志 (Cloud Run 环境下优先输出到 stderr，如果需要文件则写到 /tmp)
+    # logger.add("/tmp/monitor.log", rotation="1 day", encoding="utf-8")
     # 2. 报警专用日志 (仅记录 WARNING 及以上级别)
-    logger.add("alerts_history.log", level="WARNING", rotation="1 week", encoding="utf-8")
+    logger.add("/tmp/alerts_history.log", level="WARNING", rotation="1 week", encoding="utf-8")
     
     logger.info(f"启动 Binance 合约监控程序 (Top {TOP_N} Volume, Timeframe: {TIMEFRAME})...")
 
