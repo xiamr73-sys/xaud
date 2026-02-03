@@ -8,6 +8,8 @@ from config import get_exchange, DISCORD_WEBHOOK_URL
 from utils import calculate_indicators, check_squeeze, check_main_force_lurking, calculate_score, calculate_trade_params, check_obv_trend, check_trend_breakout, check_volume_surge, check_momentum_buildup, check_macd_golden_cross
 
 import time
+import json
+import os
 
 # 配置参数
 TIMEFRAME = '15m'      # 15分钟 K线，用于捕捉短线趋势和"过去10分钟"的波动
@@ -17,11 +19,47 @@ TOP_N = 200            # 筛选前 N 个成交量最大的币种
 SCORE_THRESHOLD = 60   # 报警分数阈值 (调整为 60)
 VERIFY_DELAY = 60 * 60 # 1小时后回测验证 (秒)
 
+# 持久化文件路径
+# Cloud Run 中只有 /tmp 是可写的，但 /tmp 在重启后也会清空
+# 如果需要重启后依然保留，必须使用外部存储 (如 Google Cloud Storage 或 数据库)
+# 但对于简单的需求，如果只是偶尔重启，可以尝试定期写入文件，
+# 并在启动时读取。但在 Cloud Run 无状态容器中，本地文件重启即失是特性。
+# 
+# 妥协方案: 
+# 鉴于当前架构没有数据库，我们无法做到 100% 的持久化 (除非连接 Redis/Postgres/GCS)。
+# 但我们可以把数据写到 /tmp/alert_history.json，这样如果只是进程崩溃但容器未销毁，还能恢复。
+# 若容器被销毁重建 (部署新版本时)，数据必然丢失。
+# 
+# 要想彻底解决，必须接外部存储。
+# 这里我们先实现 "内存 + 文件" 的双重备份 (写到 /tmp)，
+# 虽然 Cloud Run 重启会清空 /tmp，但对于本地运行或持久化服务器是有效的。
+
+HISTORY_FILE = "/tmp/alert_history.json"
+
 # 记录活跃的验证任务，防止重复: {symbol: timestamp}
 active_verifications = {}
 
 # 记录币种的报警历史 {symbol: {'first_alert_time': timestamp, 'count': 0, 'first_price': float}}
 alert_history = {}
+
+def load_history():
+    """从文件加载历史数据"""
+    global alert_history
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, 'r') as f:
+                alert_history = json.load(f)
+            logger.info(f"已恢复 {len(alert_history)} 条报警历史")
+        except Exception as e:
+            logger.error(f"加载历史数据失败: {e}")
+
+def save_history():
+    """保存历史数据到文件"""
+    try:
+        with open(HISTORY_FILE, 'w') as f:
+            json.dump(alert_history, f)
+    except Exception as e:
+        logger.error(f"保存历史数据失败: {e}")
 
 async def send_discord_alert(content):
     """
@@ -383,6 +421,9 @@ async def fetch_data_and_analyze(exchange, symbol, btc_dumping=False, top_10_sym
             # 增加报警次数
             alert_history[symbol]['count'] += 1
             
+            # 每次更新后保存到文件 (简单的持久化)
+            save_history()
+            
             first_time = alert_history[symbol]['first_alert_time']
             alert_count = alert_history[symbol]['count']
             
@@ -437,6 +478,9 @@ async def main():
     logger.add("/tmp/alerts_history.log", level="WARNING", rotation="1 week", encoding="utf-8")
     
     logger.info(f"启动 Binance 合约监控程序 (Top {TOP_N} Volume, Timeframe: {TIMEFRAME})...")
+    
+    # 启动时加载历史数据
+    load_history()
 
     last_top_10_set = set()
 
