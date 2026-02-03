@@ -79,6 +79,13 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
         indicator_obv = ta.volume.OnBalanceVolumeIndicator(close=df["close"], volume=df["volume"])
         df['OBV'] = indicator_obv.on_balance_volume()
         
+        # 6. 计算 RSI (Relative Strength Index)
+        indicator_rsi = ta.momentum.RSIIndicator(close=df["close"], window=14)
+        df['RSI'] = indicator_rsi.rsi()
+
+        # 7. 计算 EMA (用于趋势判断)
+        df['EMA_20'] = ta.trend.ema_indicator(close=df["close"], window=20)
+        
         # 计算 OBV 的斜率 (使用最近 5 根 K 线的线性回归斜率，或者简单的变化率)
         # 这里用简单的 5 周期变化率近似斜率趋势
         # OBV_Slope = (OBV_now - OBV_5_ago) / OBV_5_ago * 100 (不严谨，因为 OBV 可以是负数)
@@ -119,6 +126,41 @@ def check_main_force_lurking(price_volatility: float, oi_change_pct: float, obv_
     """
     return (abs(price_volatility) < 1.0) and (oi_change_pct > 1.0) and obv_trend
 
+def check_trend_breakout(row, df) -> bool:
+    """
+    检查是否处于强劲趋势突破形态 (Catch the Pump)
+    
+    特征:
+    1. 价格强势: 收盘价 > EMA20 (多头排列)
+    2. 动能爆发: RSI > 60 (进入强势区，但未必超买)
+    3. 突破布林带: 收盘价接近或突破布林上轨 (BBU)
+    4. 成交量放大: 当前 Volume > 1.5 * VOL_SMA_20
+    """
+    try:
+        close = row['close']
+        ema20 = row.get('EMA_20', 0)
+        bbu = row['BBU']
+        rsi = row.get('RSI', 50)
+        volume = row['volume']
+        vol_sma = row.get('VOL_SMA_20', 0)
+        
+        # 1. 趋势向上
+        trend_up = close > ema20
+        
+        # 2. 动能强劲 (RSI > 60 表示进入拉升段)
+        momentum_strong = rsi > 60
+        
+        # 3. 价格在布林带上轨附近 (突破或贴行)
+        # 允许稍微低一点点 (0.995)，捕捉刚启动的瞬间
+        near_upper_band = close >= (bbu * 0.995)
+        
+        # 4. 放量 (是均量的 1.5 倍以上)
+        volume_surge = volume > (vol_sma * 1.5)
+        
+        return trend_up and momentum_strong and near_upper_band and volume_surge
+    except Exception:
+        return False
+
 def check_obv_trend(df) -> bool:
     """
     检查 OBV 是否呈现 45 度角向上 (强势吸筹)
@@ -146,17 +188,29 @@ def check_obv_trend(df) -> bool:
     except Exception:
         return False
 
-def calculate_score(squeeze_active: bool, lurking_active: bool, volume_flow_active: bool) -> int:
+def calculate_score(squeeze_active: bool, lurking_active: bool, volume_flow_active: bool, breakout_active: bool = False) -> int:
     """
     计算综合评分
     
-    Score = (Squeeze_State * 40) + (OI_Growth * 40) + (Volume_Flow * 20)
+    Score 规则:
+    - Squeeze (挤压/蓄势): 40分
+    - Lurking (潜伏/吸筹): 40分
+    - Volume Flow (量能): 20分
+    - Breakout (突破/主升浪): 50分 (这是新的高分项)
+    
+    注意：Squeeze 和 Breakout 通常互斥，但 Lurking 和 Breakout 可能重叠。
     """
     score = 0
+    
+    if breakout_active:
+        score += 50 # 只要是突破形态，基础分就很高
+        
     if squeeze_active:
         score += 40
+        
     if lurking_active:
         score += 40
+        
     if volume_flow_active:
         score += 20
         

@@ -5,7 +5,7 @@ from loguru import logger
 import ccxt
 import aiohttp
 from config import get_exchange, DISCORD_WEBHOOK_URL
-from utils import calculate_indicators, check_squeeze, check_main_force_lurking, calculate_score, calculate_trade_params, check_obv_trend
+from utils import calculate_indicators, check_squeeze, check_main_force_lurking, calculate_score, calculate_trade_params, check_obv_trend, check_trend_breakout
 
 import time
 
@@ -257,8 +257,11 @@ async def fetch_data_and_analyze(exchange, symbol, btc_dumping=False, top_10_sym
         # 简单逻辑: 当前成交量 > 20周期均线
         is_volume_flow = latest['volume'] > latest.get('VOL_SMA_20', 9999999999) # 默认给个大数避免误判
         
+        # 4.4 趋势突破 (Breakout) - 新增
+        is_breakout = check_trend_breakout(latest, df)
+        
         # 5. 综合评分
-        score = calculate_score(is_squeeze, is_lurking, is_volume_flow)
+        score = calculate_score(is_squeeze, is_lurking, is_volume_flow, is_breakout)
         
         # 动态调整阈值 (统一为 60)
         current_threshold = 60
@@ -271,6 +274,7 @@ async def fetch_data_and_analyze(exchange, symbol, btc_dumping=False, top_10_sym
         # 6. 报警推送
         if score > current_threshold:
             tags = []
+            if is_breakout: tags.append("🚀 BREAKOUT")
             if is_squeeze: tags.append("SQUEEZE")
             if is_lurking: tags.append("LURKING")
             if is_volume_flow: tags.append("VOL_FLOW")
