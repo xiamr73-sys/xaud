@@ -455,7 +455,26 @@ def get_sector_fund_flow():
         except:
             pass
             
-        # Fallback 2: 返回一个空的 DataFrame 结构，而不是 None，方便后续判断
+        # Fallback 2: 尝试同花顺行业资金流 (10jqka)
+        try:
+            df = ak.stock_fund_flow_industry(symbol="即时")
+            if not df.empty:
+                # 同花顺字段: 行业, 行业指数, 涨跌幅, 流入资金, 流出资金, 净额, ...
+                # 映射到我们的标准列名
+                df = df.rename(columns={
+                    '行业': '名称', 
+                    '涨跌幅': '今日涨跌幅', 
+                    '净额': '主力净流入-净额'
+                })
+                # 同花顺可能没有 '主力净流入-净占比'，我们用 '净额' 替代或计算
+                # 简单起见，这里只保留共有字段
+                df['序号'] = range(1, len(df) + 1)
+                df['主力净流入-净占比'] = 0 # 缺失填充
+                return df[['序号', '名称', '今日涨跌幅', '主力净流入-净额', '主力净流入-净占比']]
+        except:
+            pass
+            
+        # Fallback 3: 返回一个空的 DataFrame 结构，而不是 None，方便后续判断
         # 或者尝试其他接口，例如 ak.stock_individual_fund_flow_rank_jg_eastmoney() 
         # 但 akshare 对板块资金流的接口比较单一，主要依赖 EM。
         
