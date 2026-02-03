@@ -5,7 +5,7 @@ from loguru import logger
 import ccxt
 import aiohttp
 from config import get_exchange, DISCORD_WEBHOOK_URL
-from utils import calculate_indicators, check_squeeze, check_main_force_lurking, calculate_score, calculate_trade_params, check_obv_trend, check_trend_breakout
+from utils import calculate_indicators, check_squeeze, check_main_force_lurking, calculate_score, calculate_trade_params, check_obv_trend, check_trend_breakout, check_volume_surge, check_momentum_buildup, check_macd_golden_cross
 
 import time
 
@@ -206,23 +206,26 @@ async def check_btc_trend(exchange):
     except Exception:
         return False
 
-async def fetch_data_and_analyze(exchange, symbol, btc_dumping=False, top_10_symbols=None):
+async def fetch_data_and_analyze(exchange, symbol, btc_dumping=False, top_10_symbols=None, is_new_top_10=False):
     """
     获取单个币种的数据并进行分析
+    
+    Args:
+        is_new_top_10 (bool): 是否是本轮新进入 Top 10 的币种
     Returns:
         tuple: (symbol, score) or (symbol, 0) if failed
     """
     try:
         # 1. 获取 OHLCV K线数据
         ohlcv = await exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME, limit=LIMIT)
-        if not ohlcv or len(ohlcv) < 20:
+        if not ohlcv or len(ohlcv) < 30: # 稍微提高数据量要求以满足 MACD 计算
             return symbol, 0
 
         # 转换为 DataFrame
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
 
-        # 2. 计算技术指标
+        # 2. 计算技术指标 (含 MACD, RSI, Slope 等新指标)
         df = calculate_indicators(df)
         latest = df.iloc[-1]
         
@@ -237,7 +240,7 @@ async def fetch_data_and_analyze(exchange, symbol, btc_dumping=False, top_10_sym
         # 3.2 资金费率
         funding_rate = await fetch_funding_rate(exchange, symbol)
 
-        # 4. 执行左侧预判算法
+        # 4. 执行多维度信号判定
         
         # 4.1 Squeeze 状态
         is_squeeze = check_squeeze(latest)
@@ -257,11 +260,34 @@ async def fetch_data_and_analyze(exchange, symbol, btc_dumping=False, top_10_sym
         # 简单逻辑: 当前成交量 > 20周期均线
         is_volume_flow = latest['volume'] > latest.get('VOL_SMA_20', 9999999999) # 默认给个大数避免误判
         
-        # 4.4 趋势突破 (Breakout) - 新增
+        # 4.4 趋势突破 (Breakout)
         is_breakout = check_trend_breakout(latest, df)
+
+        # --- 新增 v2.0 判定逻辑 ---
         
+        # 4.5 成交量激增 (Volume Surge)
+        # 当前量 > 3倍过去1小时均量
+        is_vol_surge = check_volume_surge(df)
+        
+        # 4.6 动能积蓄 (Momentum Buildup)
+        # RSI 50-70 且 斜率陡峭
+        is_momentum = check_momentum_buildup(latest, df)
+        
+        # 4.7 新晋榜单强多头 (New Top Bull)
+        # 条件: 刚进 Top 10 + MACD 金叉
+        is_macd_golden = check_macd_golden_cross(df)
+        is_new_top_bull = is_new_top_10 and is_macd_golden
+
         # 5. 综合评分
-        score = calculate_score(is_squeeze, is_lurking, is_volume_flow, is_breakout)
+        score = calculate_score(
+            squeeze_active=is_squeeze, 
+            lurking_active=is_lurking, 
+            volume_flow_active=is_volume_flow, 
+            breakout_active=is_breakout,
+            vol_surge_active=is_vol_surge,
+            momentum_active=is_momentum,
+            new_top_bull_active=is_new_top_bull
+        )
         
         # 动态调整阈值 (统一为 60)
         current_threshold = 60
@@ -274,7 +300,10 @@ async def fetch_data_and_analyze(exchange, symbol, btc_dumping=False, top_10_sym
         # 6. 报警推送
         if score > current_threshold:
             tags = []
+            if is_new_top_bull: tags.append("👑 NEW_TOP_BULL")
+            if is_vol_surge: tags.append("🔥 VOL_SURGE")
             if is_breakout: tags.append("🚀 BREAKOUT")
+            if is_momentum: tags.append("⚡ MOMENTUM")
             if is_squeeze: tags.append("SQUEEZE")
             if is_lurking: tags.append("LURKING")
             if is_volume_flow: tags.append("VOL_FLOW")
@@ -363,6 +392,8 @@ async def main():
     
     logger.info(f"启动 Binance 合约监控程序 (Top {TOP_N} Volume, Timeframe: {TIMEFRAME})...")
 
+    last_top_10_set = set()
+
     while True:
         # 外层循环：确保程序崩溃后能自动重启
         exchange = None
@@ -378,9 +409,13 @@ async def main():
                 symbols = await get_top_volume_symbols(exchange, TOP_N)
                 
                 # 识别 Top 10 币种，用于区分对待
-                top_10_symbols = symbols[:10] if symbols else []
+                current_top_10 = symbols[:10] if symbols else []
+                current_top_10_set = set(current_top_10)
                 
-                logger.info(f"本轮扫描 {len(symbols)} 个热门币种...")
+                # 计算新进入 Top 10 的币种
+                new_in_top_10 = current_top_10_set - last_top_10_set
+                
+                logger.info(f"本轮扫描 {len(symbols)} 个热门币种... 新晋Top10: {list(new_in_top_10)}")
                 
                 # 检查 BTC 趋势 (每轮扫描前检查一次，或者在循环内检查)
                 # 为了实时性，每批次检查一次可能更好，但会增加请求
@@ -390,7 +425,11 @@ async def main():
                 for i in range(0, len(symbols), BATCH_SIZE):
                     batch = symbols[i:i + BATCH_SIZE]
                     # 将 BTC 状态和 Top 10 列表传入分析函数
-                    tasks = [fetch_data_and_analyze(exchange, symbol, is_btc_dumping, top_10_symbols) for symbol in batch]
+                    tasks = []
+                    for symbol in batch:
+                        is_new = symbol in new_in_top_10
+                        tasks.append(fetch_data_and_analyze(exchange, symbol, is_btc_dumping, current_top_10, is_new))
+                        
                     results = await asyncio.gather(*tasks)
                     
                     # 收集并打印当前批次的最高分，确认程序在工作
@@ -405,6 +444,9 @@ async def main():
 
                     # 批次间增加限频延迟
                     await asyncio.sleep(0.1) 
+                
+                # 更新 Top 10 记录
+                last_top_10_set = current_top_10_set
                 
                 logger.info("扫描结束，等待 60 秒...")
                 await asyncio.sleep(60)

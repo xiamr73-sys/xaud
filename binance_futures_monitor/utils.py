@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import numpy as np
 import pandas as pd
 import ta
 from loguru import logger
@@ -11,97 +12,137 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
     1. Bollinger Bands (布林带, 20, 2.0)
     2. ATR (平均真实波幅, 14)
     3. Keltner Channels (肯特纳通道, 20, 1.5)
-    
-    Args:
-        df (pd.DataFrame): 包含 'open', 'high', 'low', 'close', 'volume' 的 K 线数据
-        
-    Returns:
-        pd.DataFrame: 包含计算出的指标的新 DataFrame
+    4. MACD (12, 26, 9)
+    5. RSI (14)
+    6. EMA (20)
     """
     try:
-        if df.empty or len(df) < 20:
+        if df.empty or len(df) < 26:
             logger.warning("数据不足，无法计算完整指标")
             return df
 
         # 1. 计算布林带 (Bollinger Bands)
-        # length=20, std=2.0
         indicator_bb = ta.volatility.BollingerBands(close=df["close"], window=20, window_dev=2.0)
         df['BBU'] = indicator_bb.bollinger_hband()
         df['BBL'] = indicator_bb.bollinger_lband()
         df['BBM'] = indicator_bb.bollinger_mavg()
-        # Band Width for reference
         df['BBW'] = indicator_bb.bollinger_wband()
 
         # 2. 计算 ATR (Average True Range)
-        # length=14
         indicator_atr = ta.volatility.AverageTrueRange(high=df["high"], low=df["low"], close=df["close"], window=14)
         df['ATR'] = indicator_atr.average_true_range()
 
         # 3. 计算肯特纳通道 (Keltner Channels)
-        # 这里的 scalar 需要调整为 1.5 (原为 2.0)
-        # original_multiplier=1.5 (对应 scalar)
-        # ta 库的 KeltnerChannel 默认 multiplier 是 2.0，我们需要手动指定
-        # 注意: ta 库较新版本的参数可能是 original_multiplier 或 multiplier，查看源码通常是 original_multiplier
-        # 为了兼容性，我们直接用 ATR 手动算，或者尝试传参
-        # 手动计算更稳健: KC_Mid = EMA(20), KC_Up = KC_Mid + 1.5*ATR(10), KC_Low = KC_Mid - 1.5*ATR(10)
-        # 这里使用 ta 库的 ATR(10) 来配合 KC
-        
-        # 3.1 计算 KC 专用的 ATR (window=10 for standard KC, but user didn't specify ATR period for KC, defaulting to 10 is common)
-        # 用户仅指定 KC(20, 1.5). 通常 KC 的 ATR 周期也是 20 或 10. 这里用 20 保持一致性? 
-        # 常用设置: EMA 20, ATR 10, Multiplier 2.0.
-        # 用户要求: 20, 1.5. 我们假设 ATR 周期也为 20 (或者 10). 
-        # 让我们使用 ta 库，并传入 window=20.
-        
-        # ta library signature: KeltnerChannel(high, low, close, window=20, window_atr=10, original_multiplier=2, ...)
-        # 我们需要 multiplier = 1.5
-        # 注意：ta 库版本差异可能导致参数名不同，最稳妥的方式是手动计算，不依赖库的特定参数名
-        
-        # 手动计算 Keltner Channels (20, 1.5)
-        # 1. 计算中轨: EMA(20)
         kc_mid = ta.trend.ema_indicator(close=df["close"], window=20)
-        
-        # 2. 计算 ATR(20) (通常 KC 使用 ATR 周期与 EMA 周期一致，或者使用 10)
-        # 用户要求: 肯特纳通道 (20, 1.5). 这里假设 ATR 周期为 20.
         kc_atr = ta.volatility.average_true_range(high=df["high"], low=df["low"], close=df["close"], window=20)
-        
-        # 3. 计算上轨和下轨
         multiplier = 1.5
         df['KCU'] = kc_mid + (multiplier * kc_atr)
         df['KCL'] = kc_mid - (multiplier * kc_atr)
-        df['KCM'] = kc_mid # 中轨
+        df['KCM'] = kc_mid
 
-        # 4. 计算成交量均线 (用于 Volume Flow 评分)
-        # SMA 20
+        # 4. 计算成交量均线
         indicator_vol_sma = ta.trend.SMAIndicator(close=df["volume"], window=20)
         df['VOL_SMA_20'] = indicator_vol_sma.sma_indicator()
 
-        # 5. 计算 OBV (On-Balance Volume)
+        # 5. 计算 OBV
         indicator_obv = ta.volume.OnBalanceVolumeIndicator(close=df["close"], volume=df["volume"])
         df['OBV'] = indicator_obv.on_balance_volume()
-        
-        # 6. 计算 RSI (Relative Strength Index)
+        df['OBV_SMA_20'] = df['OBV'].rolling(window=20).mean()
+
+        # 6. 计算 RSI
         indicator_rsi = ta.momentum.RSIIndicator(close=df["close"], window=14)
         df['RSI'] = indicator_rsi.rsi()
 
-        # 7. 计算 EMA (用于趋势判断)
+        # 7. 计算 EMA
         df['EMA_20'] = ta.trend.ema_indicator(close=df["close"], window=20)
         
-        # 计算 OBV 的斜率 (使用最近 5 根 K 线的线性回归斜率，或者简单的变化率)
-        # 这里用简单的 5 周期变化率近似斜率趋势
-        # OBV_Slope = (OBV_now - OBV_5_ago) / OBV_5_ago * 100 (不严谨，因为 OBV 可以是负数)
-        # 更好的方式：计算 OBV 的 SMA(5) 并比较当前值与 SMA 的关系，或者直接看涨势
-        # 我们用 ta 库的趋势判断辅助，或者简单判断: OBV > OBV_SMA_20 且 OBV 在上涨
-        # 为了符合 "45度角向上" 的描述，我们需要 OBV 呈现显著的上升趋势
-        # 简单算法：最近 3 根 OBV 持续上涨，且累计涨幅显著
+        # 8. 计算 MACD
+        indicator_macd = ta.trend.MACD(close=df["close"], window_slow=26, window_fast=12, window_sign=9)
+        df['MACD'] = indicator_macd.macd()
+        df['MACD_SIGNAL'] = indicator_macd.macd_signal()
+        df['MACD_HIST'] = indicator_macd.macd_diff()
         
-        # 使用 20 周期 OBV 均线作为基准
-        df['OBV_SMA_20'] = df['OBV'].rolling(window=20).mean()
+        # 9. 计算价格斜率 (Linear Regression Slope of Close over last 5 periods)
+        # normalize slope by price to make it comparable: (Slope / Price) * 100
+        # ta library has linear regression indicator? No direct "slope" in simple ta.
+        # Use numpy polyfit for last 5 points
+        # To make it efficient, we only calculate for the last few rows or use rolling apply (slow)
+        # Simple approximation: ROC (Rate of Change) of 3 periods smoothed
+        # Or simple: (Close - Close_N) / N
+        # Let's use simple ROC for efficiency as "Slope Proxy"
+        # 5-period ROC: ((Close - Close_5) / Close_5) * 100
+        df['PRICE_SLOPE_PCT'] = df['close'].pct_change(periods=5) * 100
 
         return df
 
     except Exception as e:
         logger.error(f"计算指标时发生错误: {e}")
         return df
+
+def check_volume_surge(df) -> bool:
+    """
+    检查成交量激增
+    当前 15m 成交量 > 过去 1 小时 (4根K线) 平均成交量的 3 倍
+    """
+    try:
+        if len(df) < 6:
+            return False
+            
+        current_vol = df['volume'].iloc[-1]
+        # 过去 1 小时 = 过去 4 根 (不含当前)
+        # iloc[-5:-1] 取倒数第5根到倒数第2根 (共4根)
+        past_1h_vol_avg = df['volume'].iloc[-5:-1].mean()
+        
+        if past_1h_vol_avg == 0:
+            return False
+            
+        return current_vol > (3.0 * past_1h_vol_avg)
+    except Exception:
+        return False
+
+def check_momentum_buildup(row, df) -> bool:
+    """
+    RSI 与价格斜率共振
+    条件:
+    1. 50 < RSI < 70 (上升初期，未超买)
+    2. 价格斜率陡峭上升 (这里用 5周期涨幅 > 1% 作为"陡峭"的简单定义，对于15m级别已经很快了)
+    """
+    try:
+        rsi = row.get('RSI', 50)
+        slope_pct = row.get('PRICE_SLOPE_PCT', 0)
+        
+        rsi_condition = 50 < rsi < 70
+        # 5根K线涨幅超过 1.5% 算陡峭
+        slope_condition = slope_pct > 1.5 
+        
+        return rsi_condition and slope_condition
+    except Exception:
+        return False
+
+def check_macd_golden_cross(df) -> bool:
+    """
+    检查 MACD 是否刚发生金叉 (当前 MACD > Signal 且 上一根 MACD <= Signal)
+    """
+    try:
+        if len(df) < 2:
+            return False
+            
+        curr_macd = df['MACD'].iloc[-1]
+        curr_sig = df['MACD_SIGNAL'].iloc[-1]
+        prev_macd = df['MACD'].iloc[-2]
+        prev_sig = df['MACD_SIGNAL'].iloc[-2]
+        
+        # 金叉: 此时 MACD 上穿 Signal
+        golden_cross = (curr_macd > curr_sig) and (prev_macd <= prev_sig)
+        
+        # 过滤: 必须在零轴附近或上方? 用户未要求，但通常要求放量。
+        # 用户要求: "正向放量"。即 MACD Hist > 0 (蕴含在金叉中) 且 柱子变长?
+        # 金叉本身意味着 Hist 从负变正。
+        
+        return golden_cross
+    except Exception:
+        return False
+
 
 def check_squeeze(row) -> bool:
     """
@@ -188,22 +229,32 @@ def check_obv_trend(df) -> bool:
     except Exception:
         return False
 
-def calculate_score(squeeze_active: bool, lurking_active: bool, volume_flow_active: bool, breakout_active: bool = False) -> int:
+def calculate_score(squeeze_active: bool, lurking_active: bool, volume_flow_active: bool, breakout_active: bool = False, vol_surge_active: bool = False, momentum_active: bool = False, new_top_bull_active: bool = False) -> int:
     """
-    计算综合评分
+    计算综合评分 (v2.0 升级版)
     
     Score 规则:
     - Squeeze (挤压/蓄势): 40分
     - Lurking (潜伏/吸筹): 40分
     - Volume Flow (量能): 20分
-    - Breakout (突破/主升浪): 50分 (这是新的高分项)
-    
-    注意：Squeeze 和 Breakout 通常互斥，但 Lurking 和 Breakout 可能重叠。
+    - Breakout (突破/主升浪): 50分
+    - Vol Surge (成交量激增): +30分 (新增)
+    - Momentum (动能/斜率): +30分 (新增)
+    - New Top Bull (新晋榜单+金叉): +50分 (新增, 强力信号)
     """
     score = 0
     
+    if new_top_bull_active:
+        score += 50
+    
     if breakout_active:
-        score += 50 # 只要是突破形态，基础分就很高
+        score += 50
+        
+    if vol_surge_active:
+        score += 30
+        
+    if momentum_active:
+        score += 30
         
     if squeeze_active:
         score += 40
