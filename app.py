@@ -10,9 +10,13 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from chanlun_simple import ChanlunSimple
 
+# 版本信息
+APP_VERSION = "v1.2.0"
+LAST_UPDATED = datetime.datetime.now().strftime("%Y-%m-%d")
+
 # 设置页面配置
 st.set_page_config(
-    page_title="A股 智能选股助手",
+    page_title=f"A股 智能选股助手 {APP_VERSION}",
     page_icon="📈",
     layout="wide"
 )
@@ -564,8 +568,8 @@ def run_backtest_logic(days_lookback, sample_size, progress_bar, status_text):
     return stats
 
 # --- 页面 UI ---
-
-st.title("📈 A股 智能选股助手")
+st.title(f"📈 A股 智能选股助手 {APP_VERSION}")
+st.caption(f"上次更新: {LAST_UPDATED}")
 st.markdown("基于技术指标和经典K线形态的自动化扫描工具")
 
 # 侧边栏
