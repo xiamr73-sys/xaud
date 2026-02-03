@@ -20,7 +20,7 @@ VERIFY_DELAY = 60 * 60 # 1小时后回测验证 (秒)
 # 记录活跃的验证任务，防止重复: {symbol: timestamp}
 active_verifications = {}
 
-# 记录币种的报警历史 {symbol: {'first_alert_time': timestamp, 'count': 0}}
+# 记录币种的报警历史 {symbol: {'first_alert_time': timestamp, 'count': 0, 'first_price': float}}
 alert_history = {}
 
 async def send_discord_alert(content):
@@ -356,10 +356,29 @@ async def fetch_data_and_analyze(exchange, symbol, btc_dumping=False, top_10_sym
 
             # 触发异步回测任务 (去重：如果该币种已经在回测中，则跳过)
             current_ts = time.time()
+            current_price = latest['close']
             
-            # --- 更新报警统计 ---
+            # --- 更新报警统计与内存清理 ---
             if symbol not in alert_history:
-                alert_history[symbol] = {'first_alert_time': current_ts, 'count': 0}
+                # 首次报警
+                alert_history[symbol] = {
+                    'first_alert_time': current_ts, 
+                    'count': 0,
+                    'first_price': current_price
+                }
+            else:
+                # 检查是否需要清理内存 (价格跌破首次报警价 15%)
+                first_price = alert_history[symbol].get('first_price', current_price)
+                price_drop_pct = (first_price - current_price) / first_price * 100
+                
+                if price_drop_pct > 15.0:
+                    logger.info(f"🧹 {symbol} 价格跌破首次报警价 15% (Drop: {price_drop_pct:.2f}%)，重置报警历史")
+                    # 重置历史，相当于当作新币种重新开始
+                    alert_history[symbol] = {
+                        'first_alert_time': current_ts, 
+                        'count': 0,
+                        'first_price': current_price
+                    }
             
             # 增加报警次数
             alert_history[symbol]['count'] += 1
