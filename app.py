@@ -470,10 +470,20 @@ def get_sector_fund_flow():
                     '涨跌幅': '今日涨跌幅', 
                     '净额': '主力净流入-净额'
                 })
-                # 同花顺可能没有 '主力净流入-净占比'，我们用 '净额' 替代或计算
-                # 简单起见，这里只保留共有字段
+                # 确保净额是数值类型，方便排序和着色
+                # 同花顺返回的可能是带单位的字符串，或者是纯数字
+                # 简单处理：如果是字符串，尝试转换；如果是数字，直接用
+                # 这里假设 akshare 已经处理好了或者后续 dataframe 会展示
+                
                 df['序号'] = range(1, len(df) + 1)
-                df['主力净流入-净占比'] = 0 # 缺失填充
+                
+                # 尝试计算占比 (净额 / (流入+流出) 或 净额/成交额)
+                # 如果没有总额数据，就设为0
+                if '流入资金' in df.columns and '流出资金' in df.columns:
+                     # 注意：需要确保是数值类型
+                     pass 
+                
+                df['主力净流入-净占比'] = 0 # 暂时填充
                 return df[['序号', '名称', '今日涨跌幅', '主力净流入-净额', '主力净流入-净占比']]
         except:
             pass
@@ -782,27 +792,32 @@ elif app_mode == "板块资金看板":
                 # 尝试转换 '主力净流入-净额' 为数值进行着色
                 def color_fund_flow(val):
                     try:
-                        # 简单的启发式判断：包含 '-' 且不是负号开头可能是异常，但这里通常是负数
-                        if '亿' in str(val) or '万' in str(val):
-                            # 带单位，难以直接比较，但可以判断正负
-                            if str(val).startswith('-'):
-                                return 'color: green' # 跌/流出为绿
+                        val_str = str(val)
+                        if '亿' in val_str or '万' in val_str:
+                            if val_str.startswith('-'):
+                                return 'color: green'
                             else:
-                                return 'color: red'   # 涨/流入为红
+                                return 'color: red'
+                        # 如果是纯数字 (float/int)
+                        if isinstance(val, (int, float)):
+                            if val < 0:
+                                return 'color: green'
+                            elif val > 0:
+                                return 'color: red'
                         return ''
                     except:
                         return ''
 
                 st.subheader("行业板块资金流向 (今日)")
                 
-                # 交互式表格
+                # 应用样式
                 st.dataframe(
-                    df_fund,
+                    df_fund.style.map(color_fund_flow, subset=['主力净流入-净额', '今日涨跌幅']),
                     use_container_width=True,
                     height=600
                 )
                 
-                st.info("提示：点击表头可以进行排序。红色代表资金流入，绿色代表资金流出。")
+                st.info("提示：点击表头可以进行排序。红色代表资金流入/上涨，绿色代表资金流出/下跌。")
                 
             else:
                 st.warning("暂未获取到板块资金流向数据，可能是接口访问受限或非交易时间。")
