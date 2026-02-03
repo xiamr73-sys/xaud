@@ -767,7 +767,9 @@ async def update_data():
                 last_sent = CACHE['discord_sent'].get(symbol, 0)
                 if time.time() - last_sent > 3600:
                     icon = "🟢"
-                    discord_report.append(f"{icon} **{symbol}** | Price: {item['close']} | Score: {item.get('trend_score', 0):.1f}")
+                    # Clean symbol format (e.g., BTC/USDT:USDT -> BTC/USDT)
+                    display_symbol = symbol.split(':')[0] if ':' in symbol else symbol
+                    discord_report.append(f"{icon} **{display_symbol}** | Price: {item['close']} | Score: {item.get('trend_score', 0):.1f}")
                     CACHE['discord_sent'][symbol] = time.time()
                     
                     # --- Record for Backtest ---
@@ -791,7 +793,9 @@ async def update_data():
                 last_sent = CACHE['discord_sent'].get(symbol, 0)
                 if time.time() - last_sent > 3600:
                     icon = "🔴"
-                    discord_report.append(f"{icon} **{symbol}** | Price: {item['close']} | Score: {item.get('trend_score', 0):.1f}")
+                    # Clean symbol format
+                    display_symbol = symbol.split(':')[0] if ':' in symbol else symbol
+                    discord_report.append(f"{icon} **{display_symbol}** | Price: {item['close']} | Score: {item.get('trend_score', 0):.1f}")
                     CACHE['discord_sent'][symbol] = time.time()
 
                     # --- Record for Backtest ---
@@ -817,7 +821,8 @@ async def update_data():
             last_sent = CACHE['discord_sent'].get(symbol, 0)
             if time.time() - last_sent > 3600:
                 icon = "🔥" 
-                discord_report.append(f"{icon} **{symbol}** (High ADX) | Trend: {item['trend']} | Price: {item['close']}")
+                display_symbol = symbol.split(':')[0] if ':' in symbol else symbol
+                discord_report.append(f"{icon} **{display_symbol}** (High ADX) | Trend: {item['trend']} | Price: {item['close']}")
                 CACHE['discord_sent'][symbol] = time.time()
 
                 with BACKTEST_LOCK:
@@ -837,7 +842,8 @@ async def update_data():
             last_sent = CACHE['discord_sent'].get(symbol, 0)
             if time.time() - last_sent > 3600:
                 icon = "❄️" 
-                discord_report.append(f"{icon} **{symbol}** (High ADX) | Trend: {item['trend']} | Price: {item['close']}")
+                display_symbol = symbol.split(':')[0] if ':' in symbol else symbol
+                discord_report.append(f"{icon} **{display_symbol}** (High ADX) | Trend: {item['trend']} | Price: {item['close']}")
                 CACHE['discord_sent'][symbol] = time.time()
 
                 with BACKTEST_LOCK:
