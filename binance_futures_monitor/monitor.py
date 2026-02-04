@@ -5,61 +5,26 @@ from loguru import logger
 import ccxt
 import aiohttp
 from config import get_exchange, DISCORD_WEBHOOK_URL
-from utils import calculate_indicators, check_squeeze, check_main_force_lurking, calculate_score, calculate_trade_params, check_obv_trend, check_trend_breakout, check_volume_surge, check_momentum_buildup, check_macd_golden_cross
+from utils import calculate_indicators, check_squeeze, check_main_force_lurking, calculate_score, calculate_trade_params, check_obv_trend, check_trend_breakout, check_volume_surge, check_momentum_buildup, check_macd_golden_cross, check_1m_trigger
 
 import time
-import json
 import os
+from db_utils import init_db, load_all_alerts, upsert_alert, delete_alert
 
 # 配置参数
 TIMEFRAME = '15m'      # 15分钟 K线，用于捕捉短线趋势和"过去10分钟"的波动
+TRIGGER_TIMEFRAME = '1m' # 1分钟 K线，用于高频信号触发
 LIMIT = 100            # 获取K线数量
 BATCH_SIZE = 10        # 并发批次大小
 TOP_N = 200            # 筛选前 N 个成交量最大的币种
 SCORE_THRESHOLD = 60   # 报警分数阈值 (调整为 60)
 VERIFY_DELAY = 60 * 60 # 1小时后回测验证 (秒)
 
-# 持久化文件路径
-# Cloud Run 中只有 /tmp 是可写的，但 /tmp 在重启后也会清空
-# 如果需要重启后依然保留，必须使用外部存储 (如 Google Cloud Storage 或 数据库)
-# 但对于简单的需求，如果只是偶尔重启，可以尝试定期写入文件，
-# 并在启动时读取。但在 Cloud Run 无状态容器中，本地文件重启即失是特性。
-# 
-# 妥协方案: 
-# 鉴于当前架构没有数据库，我们无法做到 100% 的持久化 (除非连接 Redis/Postgres/GCS)。
-# 但我们可以把数据写到 /tmp/alert_history.json，这样如果只是进程崩溃但容器未销毁，还能恢复。
-# 若容器被销毁重建 (部署新版本时)，数据必然丢失。
-# 
-# 要想彻底解决，必须接外部存储。
-# 这里我们先实现 "内存 + 文件" 的双重备份 (写到 /tmp)，
-# 虽然 Cloud Run 重启会清空 /tmp，但对于本地运行或持久化服务器是有效的。
-
-HISTORY_FILE = "/tmp/alert_history.json"
-
 # 记录活跃的验证任务，防止重复: {symbol: timestamp}
 active_verifications = {}
 
 # 记录币种的报警历史 {symbol: {'first_alert_time': timestamp, 'count': 0, 'first_price': float}}
 alert_history = {}
-
-def load_history():
-    """从文件加载历史数据"""
-    global alert_history
-    if os.path.exists(HISTORY_FILE):
-        try:
-            with open(HISTORY_FILE, 'r') as f:
-                alert_history = json.load(f)
-            logger.info(f"已恢复 {len(alert_history)} 条报警历史")
-        except Exception as e:
-            logger.error(f"加载历史数据失败: {e}")
-
-def save_history():
-    """保存历史数据到文件"""
-    try:
-        with open(HISTORY_FILE, 'w') as f:
-            json.dump(alert_history, f)
-    except Exception as e:
-        logger.error(f"保存历史数据失败: {e}")
 
 async def send_discord_alert(content):
     """
@@ -165,7 +130,7 @@ async def get_top_volume_symbols(exchange, top_n=200):
         logger.error(f"获取热门币种失败: {e}")
         return []
 
-async def fetch_open_interest_history_change(exchange, symbol):
+async def fetch_open_interest_history_change(exchange, symbol, timeframe=TIMEFRAME):
     """
     获取 OI 变化率 (尝试获取历史 OI)
     这里为了简化，我们尝试获取最近的 OI 历史。
@@ -179,7 +144,7 @@ async def fetch_open_interest_history_change(exchange, symbol):
         # 获取最近 2 个周期的 OI (例如 15m 级别)
         # 注意: ccxt 的 fetch_open_interest_history 参数可能因交易所而异
         # Binance FAPI: period="15m"
-        history = await exchange.fetch_open_interest_history(symbol, timeframe=TIMEFRAME, limit=2)
+        history = await exchange.fetch_open_interest_history(symbol, timeframe=timeframe, limit=2)
         
         if len(history) < 2:
             return 0.0
@@ -257,7 +222,7 @@ async def fetch_data_and_analyze(exchange, symbol, btc_dumping=False, top_10_sym
         tuple: (symbol, score) or (symbol, 0) if failed
     """
     try:
-        # 1. 获取 OHLCV K线数据
+        # 1. 获取 15m K线数据 (大趋势参考)
         ohlcv = await exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME, limit=LIMIT)
         if not ohlcv or len(ohlcv) < 30: # 稍微提高数据量要求以满足 MACD 计算
             return symbol, 0
@@ -270,56 +235,59 @@ async def fetch_data_and_analyze(exchange, symbol, btc_dumping=False, top_10_sym
         df = calculate_indicators(df)
         latest = df.iloc[-1]
         
-        # 3. 获取辅助数据 (OI 和 资金费率)
+        # --- 3. 新增: 获取 1m 数据用于高频触发 ---
+        ohlcv_1m = await exchange.fetch_ohlcv(symbol, timeframe=TRIGGER_TIMEFRAME, limit=20)
+        df_1m = pd.DataFrame()
+        if ohlcv_1m and len(ohlcv_1m) > 10:
+            df_1m = pd.DataFrame(ohlcv_1m, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            df_1m['timestamp'] = pd.to_datetime(df_1m['timestamp'], unit='ms')
+
+        # 4. 获取辅助数据 (OI 和 资金费率)
         # 并发获取以提高效率
-        # fetch_open_interest_history_change 是我们自定义的，不是 ccxt 原生，需注意
-        # 这里为了简单，还是串行或者用 gather，但 OI 需要 history，比较复杂
         
-        # 3.1 OI 变化率
-        oi_change_pct = await fetch_open_interest_history_change(exchange, symbol)
+        # 4.1 OI 变化率 (分别获取 15m 和 1m)
+        # 15m OI 用于判断"主力潜伏" (Lurking)
+        oi_change_pct_15m = await fetch_open_interest_history_change(exchange, symbol, timeframe=TIMEFRAME)
         
-        # 3.2 资金费率
+        # 1m OI 用于判断"高频异动" (Trigger)
+        oi_change_pct_1m = await fetch_open_interest_history_change(exchange, symbol, timeframe=TRIGGER_TIMEFRAME)
+        
+        # 4.2 资金费率
         funding_rate = await fetch_funding_rate(exchange, symbol)
 
-        # 4. 执行多维度信号判定
+        # 5. 执行多维度信号判定
         
-        # 4.1 Squeeze 状态
+        # --- 5.1 15m 趋势判定 (Context) ---
+        
+        # Squeeze 状态
         is_squeeze = check_squeeze(latest)
         
-        # 4.2 主力潜伏 (OI 异动)
-        # 价格波幅: (High - Low) / Open * 100
-        # 使用当前 K 线的波幅
+        # 主力潜伏 (OI 异动) - 使用 15m 数据
         price_volatility = ((latest['high'] - latest['low']) / latest['open']) * 100
-        
-        # 检查 OBV 趋势 (确认吸筹)
         is_obv_rising = check_obv_trend(df)
+        is_lurking = check_main_force_lurking(price_volatility, oi_change_pct_15m, is_obv_rising)
         
-        # 判断潜伏：横盘 + OI流入 + OBV向上
-        is_lurking = check_main_force_lurking(price_volatility, oi_change_pct, is_obv_rising)
+        # 成交量流向 (Volume Flow)
+        is_volume_flow = latest['volume'] > latest.get('VOL_SMA_20', 9999999999)
         
-        # 4.3 成交量流向 (Volume Flow)
-        # 简单逻辑: 当前成交量 > 20周期均线
-        is_volume_flow = latest['volume'] > latest.get('VOL_SMA_20', 9999999999) # 默认给个大数避免误判
-        
-        # 4.4 趋势突破 (Breakout)
+        # 趋势突破 (Breakout)
         is_breakout = check_trend_breakout(latest, df)
 
-        # --- 新增 v2.0 判定逻辑 ---
-        
-        # 4.5 成交量激增 (Volume Surge)
-        # 当前量 > 3倍过去1小时均量
+        # 成交量激增 (Volume Surge) - 15m
         is_vol_surge = check_volume_surge(df)
         
-        # 4.6 动能积蓄 (Momentum Buildup)
-        # RSI 50-70 且 斜率陡峭
+        # 动能积蓄 (Momentum Buildup)
         is_momentum = check_momentum_buildup(latest, df)
         
-        # 4.7 新晋榜单强多头 (New Top Bull)
-        # 条件: 刚进 Top 10 + MACD 金叉
+        # 新晋榜单强多头
         is_macd_golden = check_macd_golden_cross(df)
         is_new_top_bull = is_new_top_10 and is_macd_golden
 
-        # 5. 综合评分
+        # --- 5.2 1m 触发判定 (Trigger) ---
+        # 只有当 1m 出现异动时，才考虑激活"高频报警"
+        is_1m_active, trigger_msg = check_1m_trigger(df_1m, oi_change_pct_1m)
+
+        # 6. 综合评分
         score = calculate_score(
             squeeze_active=is_squeeze, 
             lurking_active=is_lurking, 
@@ -330,16 +298,34 @@ async def fetch_data_and_analyze(exchange, symbol, btc_dumping=False, top_10_sym
             new_top_bull_active=is_new_top_bull
         )
         
-        # 动态调整阈值 (统一为 60)
+        # 动态调整阈值
         current_threshold = 60
         
-        # 如果是 Top 10 以外的币种 (土狗/Meme)，要求更高
-        # 用户要求统一门槛，暂时注释掉差异化逻辑
-        # if top_10_symbols and symbol not in top_10_symbols:
-        #    current_threshold = 70
+        # --- 7. 报警判定逻辑调整 ---
+        # 用户要求: "大趋势参考 15min，但信号触发必须参考 1min 的量价和持仓异动"
+        # 逻辑: 
+        #   如果 1m 触发 (is_1m_active) 且 15m 趋势不差 (分数 > 30 或 有任意一个 15m 正向信号)，则强制报警
+        #   或者，如果 15m 分数极高 (例如 > 80)，也报警 (保持原有逻辑)
+        
+        should_alert = False
+        alert_reason = ""
+        
+        # 策略 A: 1m 异动主导 (高频抢跑)
+        if is_1m_active:
+            # 过滤: 15m 趋势不能太差 (例如不要在暴跌中去接飞刀)
+            # 简单判断: 15m 分数 > 20 或者 有任意正向形态
+            if score >= 20: 
+                score = max(score, 75) # 强制提分，确保触发
+                should_alert = True
+                alert_reason = f"⚡ {trigger_msg}"
+        
+        # 策略 B: 15m 趋势主导 (原有逻辑)
+        elif score > current_threshold:
+            should_alert = True
+            alert_reason = "趋势共振"
             
         # 6. 报警推送
-        if score > current_threshold:
+        if should_alert:
             tags = []
             if is_new_top_bull: tags.append("👑 NEW_TOP_BULL")
             if is_vol_surge: tags.append("🔥 VOL_SURGE")
@@ -348,6 +334,7 @@ async def fetch_data_and_analyze(exchange, symbol, btc_dumping=False, top_10_sym
             if is_squeeze: tags.append("SQUEEZE")
             if is_lurking: tags.append("LURKING")
             if is_volume_flow: tags.append("VOL_FLOW")
+            if is_1m_active: tags.append("⚡ 1M_TRIGGER") # 新增标签
             
             # 计算交易参数
             trade_params = calculate_trade_params(latest)
@@ -359,7 +346,6 @@ async def fetch_data_and_analyze(exchange, symbol, btc_dumping=False, top_10_sym
                 short_p = trade_params['short']
                 
                 # BTC 趋势过滤
-                # 如果 BTC 正在急跌，禁止推送做多建议
                 if btc_dumping:
                     trade_msg = f"\n   📉 [做空建议] SL: {short_p['sl']:.4f} | TP1: {short_p['tp1']:.4f} | RR: {short_p['rr']:.2f}\n   🚫 [多头暂停] BTC 急跌保护中"
                 else:
@@ -368,7 +354,6 @@ async def fetch_data_and_analyze(exchange, symbol, btc_dumping=False, top_10_sym
                     if funding_rate < 0:
                         funding_boost = " 🔥 [空头回补潜力]"
                         
-                    # OBV 趋势高亮
                     obv_boost = ""
                     if is_obv_rising:
                         obv_boost = " 📈 [OBV趋势确认]"
@@ -385,78 +370,67 @@ async def fetch_data_and_analyze(exchange, symbol, btc_dumping=False, top_10_sym
 
             logger.warning(
                 f"🚨 【高分报警】 {symbol} | Score: {score}\n"
+                f"   • 触发: {alert_reason}\n"
                 f"   • 状态: {', '.join(tags)}\n"
                 f"   • 价格: {latest['close']} (Volat: {price_volatility:.2f}%)\n"
-                f"   • OI变动: {oi_change_pct:.2f}%\n"
+                f"   • OI变动(15m): {oi_change_pct_15m:.2f}%\n"
+                f"   • OI变动(1m): {oi_change_pct_1m:.2f}%\n"
                 f"   • 布林带缩口: {'YES' if is_squeeze else 'NO'}"
                 f"{trade_msg}"
             )
 
-            # 触发异步回测任务 (去重：如果该币种已经在回测中，则跳过)
+            # 触发异步回测任务
             current_ts = time.time()
             current_price = latest['close']
             
             # --- 更新报警统计与内存清理 ---
             if symbol not in alert_history:
-                # 首次报警
                 alert_history[symbol] = {
                     'first_alert_time': current_ts, 
                     'count': 0,
                     'first_price': current_price
                 }
+                # 新增记录，写入数据库
+                upsert_alert(symbol, alert_history[symbol])
             else:
-                # 检查是否需要清理内存 (价格跌破首次报警价 15%)
                 first_price = alert_history[symbol].get('first_price', current_price)
                 price_drop_pct = (first_price - current_price) / first_price * 100
                 
                 if price_drop_pct > 15.0:
                     logger.info(f"🧹 {symbol} 价格跌破首次报警价 15% (Drop: {price_drop_pct:.2f}%)，重置报警历史")
-                    # 重置历史，相当于当作新币种重新开始
                     alert_history[symbol] = {
                         'first_alert_time': current_ts, 
                         'count': 0,
                         'first_price': current_price
                     }
+                    # 重置记录，写入数据库
+                    upsert_alert(symbol, alert_history[symbol])
             
-            # 增加报警次数
             alert_history[symbol]['count'] += 1
-            
-            # 每次更新后保存到文件 (简单的持久化)
-            save_history()
+            # 更新计数，写入数据库
+            upsert_alert(symbol, alert_history[symbol])
             
             first_time = alert_history[symbol]['first_alert_time']
             alert_count = alert_history[symbol]['count']
             
-            # 格式化首次报警时间 (例如: 10:24)
-            # 转换为 UTC+8 (中国时间)
             first_time_str = (pd.to_datetime(first_time, unit='s') + pd.Timedelta(hours=8)).strftime('%H:%M')
-            
-            # 计算相对于首次报警价格的涨幅
             first_price = alert_history[symbol].get('first_price', latest['close'])
             price_change_from_first = ((latest['close'] - first_price) / first_price) * 100
             
-            # 推送到 Discord (精简版)
-            # 用户要求: 去除止盈止损、去除状态、去除资金费率
-            # 仅保留核心信息：币种、分数、价格、OI变动
-            # 新增: 首次报警时间、当前报警次数、首次报警价格(含涨幅)
-            
+            # 构造 Discord 消息
             discord_msg = (
                 f"🚨 **高分报警** {symbol} | Score: {score}\n"
+                f"**触发**: {alert_reason}\n"
                 f"**价格**: {latest['close']}\n"
-                f"**OI变动**: {oi_change_pct:.2f}%\n"
+                f"**OI变动(1m)**: {oi_change_pct_1m:.2f}%\n"
                 f"**首次报警**: {first_time_str} (第 {alert_count} 次)\n"
                 f"**首报价格**: {first_price} ({price_change_from_first:+.2f}%)"
             )
-            # 异步非阻塞推送
             asyncio.create_task(send_discord_alert(discord_msg))
 
-            # 简单的去重逻辑：如果该币种在 VERIFY_DELAY 内已触发过，则不再创建新任务
-            # 或者每次触发都创建（如果想看每个信号的表现）
-            # 这里为了防止刷屏，限制每个币种在 30 分钟内只追踪一次
             if symbol not in active_verifications or (current_ts - active_verifications[symbol] > VERIFY_DELAY):
                 active_verifications[symbol] = current_ts
                 signal_time_str = pd.to_datetime(current_ts, unit='s').strftime('%Y-%m-%d %H:%M:%S')
-                # 启动后台任务
                 asyncio.create_task(
                     verify_signal_performance(symbol, latest['close'], score, signal_time_str)
                 )
@@ -464,7 +438,6 @@ async def fetch_data_and_analyze(exchange, symbol, btc_dumping=False, top_10_sym
         return symbol, score
 
     except Exception as e:
-        # 降低日志噪音，仅调试时开启
         # logger.debug(f"处理 {symbol} 时出错: {str(e)}")
         return symbol, 0
 
@@ -480,7 +453,8 @@ async def main():
     logger.info(f"启动 Binance 合约监控程序 (Top {TOP_N} Volume, Timeframe: {TIMEFRAME})...")
     
     # 启动时加载历史数据
-    load_history()
+    global alert_history
+    alert_history = load_all_alerts()
 
     last_top_10_set = set()
 

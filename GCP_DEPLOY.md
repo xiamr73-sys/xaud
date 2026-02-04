@@ -1,67 +1,43 @@
-# 部署到 Google Cloud Run 指南
+# GCP 部署指南
 
-本项目非常适合部署在 Google Cloud Run，因为它支持容器化部署，且可以通过配置保持后台线程运行。
+本指南将帮助您将量化监控系统部署到 Google Cloud Platform (GCP)。我们推荐使用 **Cloud Run**，因为它支持无服务器容器，非常适合 Streamlit 应用，且成本较低。
 
-## 前置准备
+## 准备工作
 
-1.  **Google Cloud 账号**: 确保你有一个活跃的 Google Cloud 项目。
-2.  **gcloud CLI**: 确保本地已安装并登录了 Google Cloud SDK。
-    *   登录命令: `gcloud auth login`
-    *   设置项目: `gcloud config set project YOUR_PROJECT_ID`
+1.  **Google Cloud 账号**: 确保您拥有一个激活了计费功能的 GCP 账号。
+2.  **创建项目**: 在 GCP 控制台创建一个新项目，记录下 `PROJECT_ID`。
+3.  **安装 gcloud CLI**: 在您的本地机器上安装 Google Cloud SDK。
+    *   Mac: `brew install --cask google-cloud-sdk`
+    *   Windows: 下载安装包
 
 ## 部署步骤
 
 ### 方法一：使用自动化脚本 (推荐)
 
-我们准备了一个一键部署脚本 `deploy_gcp.sh`。
-
-1.  **设置项目 ID**:
+1.  打开终端，进入项目目录。
+2.  登录您的 GCP 账号：
     ```bash
-    export PROJECT_ID="你的项目ID"
+    gcloud auth login
     ```
-    *(你可以在 Google Cloud Console 的首页找到项目 ID)*
-
-2.  **运行脚本**:
+3.  运行部署脚本 (将 `YOUR_PROJECT_ID` 替换为您的真实项目ID)：
     ```bash
-    chmod +x deploy_gcp.sh
-    ./deploy_gcp.sh
+    ./deploy_gcp.sh YOUR_PROJECT_ID
     ```
+    *   脚本会自动启用必要服务、构建 Docker 镜像并部署到 Cloud Run。
+    *   部署完成后，终端会显示访问链接。
 
-3.  **等待完成**:
-    脚本会自动构建 Docker 镜像，推送到 Google Container Registry，并部署到 Cloud Run。
-    完成后，终端会显示访问 URL。
+### 方法二：手动部署 (App Engine)
 
-### 方法二：手动部署
+如果您更喜欢使用 App Engine (无需 Docker 知识)：
 
-如果你想了解每一步发生了什么，可以手动执行以下命令：
-
-1.  **启用服务**:
+1.  确保目录中有 `app.yaml` 文件。
+2.  运行命令：
     ```bash
-    gcloud services enable cloudbuild.googleapis.com run.googleapis.com
+    gcloud app deploy app.yaml --project YOUR_PROJECT_ID
     ```
 
-2.  **构建镜像**:
-    ```bash
-    gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/crypto-monitor
-    ```
+## 常见问题
 
-3.  **部署服务**:
-    ```bash
-    gcloud run deploy crypto-monitor \
-      --image gcr.io/YOUR_PROJECT_ID/crypto-monitor \
-      --platform managed \
-      --region us-central1 \
-      --allow-unauthenticated \
-      --no-cpu-throttling \
-      --min-instances 1 \
-      --port 8080
-    ```
-
-### 关键配置说明
-
-*   **`--no-cpu-throttling`**: 这个参数至关重要。默认情况下，Cloud Run 会在没有 HTTP 请求时冻结 CPU，这会导致我们的后台监控线程暂停。启用此选项后，CPU 会一直分配，确保后台每 5 分钟的自动更新正常运行。
-*   **`--min-instances 1`**: 确保至少有一个实例一直在运行，避免冷启动，并保持后台监控持续在线。
-
-## 成本提示
-
-由于开启了 `no-cpu-throttling` 和 `min-instances 1`，即使没有用户访问，该服务也会持续消耗计算资源。请关注 Google Cloud 的计费情况。Cloud Run 有免费层级，但持续运行可能会超出免费额度。
+*   **端口问题**: Streamlit 默认运行在 8501 端口。我们的 `Dockerfile` 和 `deploy_gcp.sh` 已经配置好了端口转发。
+*   **权限问题**: 如果脚本提示权限错误，请确保您已登录 (`gcloud auth login`) 并设置了正确的项目 (`gcloud config set project YOUR_PROJECT_ID`)。
+*   **成本**: Cloud Run 按使用量计费，对于个人监控项目，通常在免费额度内或费用极低。

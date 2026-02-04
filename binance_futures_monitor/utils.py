@@ -135,13 +135,65 @@ def check_macd_golden_cross(df) -> bool:
         # 金叉: 此时 MACD 上穿 Signal
         golden_cross = (curr_macd > curr_sig) and (prev_macd <= prev_sig)
         
-        # 过滤: 必须在零轴附近或上方? 用户未要求，但通常要求放量。
-        # 用户要求: "正向放量"。即 MACD Hist > 0 (蕴含在金叉中) 且 柱子变长?
-        # 金叉本身意味着 Hist 从负变正。
-        
         return golden_cross
     except Exception:
         return False
+
+def check_1m_trigger(df_1m: pd.DataFrame, oi_change_1m: float) -> tuple[bool, str]:
+    """
+    检查 1分钟 级别的异动信号 (高频扫描)
+    
+    条件:
+    1. 价格异动: 1分钟涨幅在 0.3% - 1.2% 之间 (刚启动，未飞远)
+    2. 成交量异动: 当前量 > 3 * 过去10分钟均量
+    3. 持仓量异动: 1分钟 OI 净增 > 0.05% (可选，或作为加分项)
+    
+    Returns:
+        (is_triggered, reason_msg)
+    """
+    try:
+        if df_1m.empty or len(df_1m) < 15:
+            return False, ""
+            
+        latest = df_1m.iloc[-1]
+        close = latest['close']
+        open_p = latest['open']
+        volume = latest['volume']
+        
+        # 1. 价格涨幅 (0.3% ~ 1.2%)
+        change_pct = (close - open_p) / open_p * 100
+        is_price_active = 0.3 <= change_pct <= 1.2
+        
+        # 2. 成交量激增
+        # 计算过去 10 根 K 线的平均成交量 (不含当前)
+        past_vol_avg = df_1m['volume'].iloc[-11:-1].mean()
+        is_vol_active = False
+        if past_vol_avg > 0:
+            is_vol_active = volume > (3.0 * past_vol_avg)
+            
+        # 3. OI 异动 (作为辅助确认，或者独立触发)
+        # 1分钟级别 OI 变化通常很小，> 0.05% 算显著
+        is_oi_active = oi_change_1m > 0.05
+        
+        # 触发逻辑:
+        # A. 量价齐升 (价格启动 + 放量)
+        if is_price_active and is_vol_active:
+            return True, f"1m量价齐升(涨{change_pct:.2f}%, 量{volume/past_vol_avg:.1f}x)"
+            
+        # B. 巨量抢筹 (价格微涨 + 巨量 + OI增加)
+        if (change_pct > 0.1) and (volume > 5.0 * past_vol_avg) and is_oi_active:
+            return True, f"1m巨量抢筹(量{volume/past_vol_avg:.1f}x, OI+{oi_change_1m:.2f}%)"
+            
+        # C. 纯 OI 暴增 (价格未动，主力潜伏)
+        if is_oi_active and (oi_change_1m > 0.2): # 0.2% in 1m is huge
+            return True, f"1m持仓暴增(OI+{oi_change_1m:.2f}%)"
+            
+        return False, ""
+        
+    except Exception as e:
+        logger.error(f"1m check error: {e}")
+        return False, ""
+
 
 
 def check_squeeze(row) -> bool:

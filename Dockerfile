@@ -1,31 +1,20 @@
-# 使用 Python 3.9 作为基础镜像 (兼容性好)
+# Base image
 FROM python:3.9-slim
 
-# 安装系统依赖 (git 用于某些 pip 包)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
+# Set working directory
 WORKDIR /app
 
-# 复制并安装依赖
+# Copy requirements
 COPY requirements.txt .
+
+# Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 复制项目代码
+# Copy application code
 COPY . .
 
-# 设置权限
-RUN chmod +x start.sh
+# Expose port for Streamlit
+EXPOSE 8501
 
-# 设置环境变量
-ENV PYTHONUNBUFFERED=1
-# Cloud Run 会覆盖 PORT 变量，但我们设置一个明确的默认值
-ENV PORT=5001
-
-# 暴露端口 (仅作为文档)
-EXPOSE 5001
-
-# 启动脚本
-CMD ["./start.sh"]
+# Run Streamlit
+CMD ["streamlit", "run", "main.py", "--server.port=8501", "--server.address=0.0.0.0"]
