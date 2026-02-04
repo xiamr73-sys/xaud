@@ -2,33 +2,17 @@ import asyncio
 import os
 import threading
 import time
-# Lazy load heavy libraries to speed up startup
-# import ccxt.async_support as ccxt
-# import pandas as pd
-# import numpy as np
+import ccxt.async_support as ccxt
+import pandas as pd
+import numpy as np
 import requests
 from flask import Flask, render_template, jsonify, request
 from dotenv import load_dotenv
-# import ai_analysis_service 
+import ai_analysis_service  # Import the new service
 import math
 
 # Load environment variables
 load_dotenv()
-
-# Global pandas/numpy/ccxt placeholders
-pd = None
-np = None
-ccxt = None
-ai_analysis_service = None
-
-def lazy_load_libs():
-    global pd, np, ccxt, ai_analysis_service
-    if pd is None:
-        import pandas as pd
-        import numpy as np
-        import ccxt.async_support as ccxt
-        import ai_analysis_service
-        print(">>> Libraries loaded successfully")
 
 API_KEY = os.getenv('BINANCE_API_KEY')
 SECRET_KEY = os.getenv('BINANCE_SECRET_KEY')
@@ -54,11 +38,9 @@ CACHE = {
     'is_updating': False,
     'last_top_10': set(), # Store last Top 10 symbols to detect new entries
     'seen_coins': set(), # Store ALL coins seen in Top 10 to detect 'First Entry'
-    'btc_status': {'trend': 'NEUTRAL', 'adx': 0}, # Store BTC trend info for frontend
     'market_scan_results': [], # Store analysis for top 200 coins
     'scan_progress': {'current': 0, 'total': 0, 'status': 'idle'}, # Track scanning progress
-    'scan_logs': [], # Real-time logs for frontend
-    'previous_scores': {} # Store previous trend scores to detect rapid increases
+    'scan_logs': [] # Real-time logs for frontend
 }
 
 # --- Signal Backtest Storage ---
@@ -66,25 +48,21 @@ CACHE = {
 BACKTEST_SIGNALS = {} 
 BACKTEST_LOCK = threading.Lock()
 
-def _send_discord_alert_thread(content, webhook_url):
+def send_discord_alert(content, webhook_url=None):
+    # Default to General Webhook if not specified
     target_url = webhook_url or DISCORD_WEBHOOK_GENERAL
+    
     if not target_url:
         print(f"错误: 未找到 Discord Webhook URL (Target: {webhook_url})")
         return
     
     payload = {"content": content}
     try:
-        # Set a timeout to prevent hanging threads
-        response = requests.post(target_url, json=payload, timeout=10)
+        response = requests.post(target_url, json=payload)
         response.raise_for_status()
         print(f"Discord 推送成功 ({'General' if target_url == DISCORD_WEBHOOK_GENERAL else 'First Entry'})")
     except Exception as e:
         print(f"Discord 推送失败: {e}")
-
-def send_discord_alert(content, webhook_url=None):
-    # Run in a separate thread to avoid blocking the main loop or async loop
-    # This prevents network latency from freezing the market scan or web server
-    threading.Thread(target=_send_discord_alert_thread, args=(content, webhook_url)).start()
 
 # --- Backtest Verification Logic ---
 def run_backtest_verification():
@@ -709,12 +687,6 @@ async def update_data():
                         btc_trend = "DOWN"
                 
                 print(f"BTC Trend: {btc_trend} (ADX: {current_adx:.2f})")
-                
-                # Update Cache for Frontend
-                CACHE['btc_status'] = {
-                    'trend': btc_trend,
-                    'adx': float(current_adx)
-                }
             
         except Exception as e:
             print(f"Error analyzing BTC trend: {e}")
@@ -748,123 +720,113 @@ async def update_data():
                 # Send 'First Entry' Alert to Dedicated Channel
                 if first_entry_msg:
                     alert_content = "\n".join(first_entry_msg)
-                    target_url = DISCORD_WEBHOOK_FIRST_ENTRY or DISCORD_WEBHOOK_GENERAL
-                    send_discord_alert(alert_content, webhook_url=target_url)
+                    if DISCORD_WEBHOOK_FIRST_ENTRY:
+                        send_discord_alert(alert_content, webhook_url=DISCORD_WEBHOOK_FIRST_ENTRY)
+                    else:
+                        print("Warning: First Entry Webhook not set, falling back to General")
+                        send_discord_alert(alert_content, webhook_url=DISCORD_WEBHOOK_GENERAL)
 
-                # Send Regular 'New Entry' Alert to Dedicated Channel
+                # Send Regular 'New Entry' Alert to General Channel
                 if new_entry_msg:
                     alert_content = "**🔔 Top 10 榜单变动**\n" + "\n".join(new_entry_msg)
-                    target_url = DISCORD_WEBHOOK_FIRST_ENTRY or DISCORD_WEBHOOK_GENERAL
-                    send_discord_alert(alert_content, webhook_url=target_url)
+                    send_discord_alert(alert_content)
         
         # Update Cache
         CACHE['last_top_10'] = current_top_10_symbols
-        
-        # --- Rapid Score Increase Detection (Top 100) ---
-        rapid_risers = []
-        SCORE_JUMP_THRESHOLD = 10.0 # Points increase to trigger alert
-        
-        # Check Top 100 by volume (which corresponds to first 100 in all_analysis_results)
-        top_100_coins = all_analysis_results[:100]
-        
-        for item in top_100_coins:
-            symbol = item['symbol']
-            current_score = item.get('trend_score', 0)
-            
-            # Get previous score
-            prev_score = CACHE['previous_scores'].get(symbol)
-            
-            if prev_score is not None:
-                score_delta = current_score - prev_score
-                if score_delta >= SCORE_JUMP_THRESHOLD:
-                    rapid_risers.append({
-                        'symbol': symbol,
-                        'current': current_score,
-                        'prev': prev_score,
-                        'delta': score_delta,
-                        'price': item['close'],
-                        'trend': item.get('trend', 'NEUTRAL')
-                    })
-        
-        # Update previous scores for NEXT run (store all analyzed coins)
-        new_scores = {}
-        for item in all_analysis_results:
-            new_scores[item['symbol']] = item.get('trend_score', 0)
-        CACHE['previous_scores'] = new_scores
-        
-        # Send Alert for Rapid Risers
-        if rapid_risers:
-            riser_msg = []
-            for r in rapid_risers:
-                display_symbol = r['symbol'].split(':')[0] if ':' in r['symbol'] else r['symbol']
-                
-                # Determine Signal Icon/Text
-                if r['trend'] == 'STRONG_LONG':
-                    signal_icon = "🟢"
-                    signal_text = "LONG"
-                elif r['trend'] == 'STRONG_SHORT':
-                    signal_icon = "🔴"
-                    signal_text = "SHORT"
-                else:
-                    signal_icon = "⚪"
-                    signal_text = "NEUTRAL"
-                
-                # Format: ✨ **发现新星**: {symbol} | 信号: {icon} {text} | 价格: {price} | 分数: {prev}->{current}
-                riser_msg.append(f"✨ **发现新星**: {display_symbol} | 信号: {signal_icon} {signal_text} | 价格: {r['price']} | 分数: {r['prev']:.1f}➔{r['current']:.1f} (+{r['delta']:.1f})")
-            
-            alert_content = "\n".join(riser_msg)
-            target_url = DISCORD_WEBHOOK_FIRST_ENTRY or DISCORD_WEBHOOK_GENERAL
-            send_discord_alert(alert_content, webhook_url=target_url)
         # -----------------------------------
 
         # --- Send Discord Summary Report ---
         discord_report = []
         
-        # Section 1: Top 3 STRONG LONGs (Score)
-        if btc_trend != "DOWN" and CACHE['longs']:
-            discord_report.append("🚀 **Top 3 STRONG LONGs (Score)**")
-            for item in CACHE['longs']: 
-                symbol = item['symbol']
-                display_symbol = symbol.split(':')[0] if ':' in symbol else symbol
-                adx_val = f"{item['adx']:.1f}" if 'adx' in item else "N/A"
-                discord_report.append(f"• **{display_symbol}** | Price: {item['close']} | Score: {item.get('trend_score', 0):.1f} | ADX: {adx_val}")
-            discord_report.append("") # Empty line separator
+        # Process Longs (Alert regardless of BTC trend)
+        for item in CACHE['longs']: # Use sorted Top 3 Longs
+            symbol = item['symbol']
+            # Track alert to prevent spamming (limit 1 per hour per coin)
+            last_sent = CACHE['discord_sent'].get(symbol, 0)
+            if time.time() - last_sent > 3600:
+                icon = "🟢"
+                discord_report.append(f"{icon} **{symbol}** | Price: {item['close']} | Score: {item.get('trend_score', 0):.1f}")
+                CACHE['discord_sent'][symbol] = time.time()
+                
+                # --- Record for Backtest ---
+                with BACKTEST_LOCK:
+                    signal_id = f"{symbol}_{int(time.time())}"
+                    BACKTEST_SIGNALS[signal_id] = {
+                        'symbol': symbol,
+                        'type': 'LONG',
+                        'entry_price': float(item['close']),
+                        'entry_time': time.time(),
+                        'oi_growth': float(item['open_interest_change'])
+                    }
+                # ---------------------------
 
-        # Section 2: Top 3 STRONG SHORTs (Score)
-        if btc_trend != "UP" and CACHE['shorts']:
-            discord_report.append("🔻 **Top 3 STRONG SHORTs (Score)**")
-            for item in CACHE['shorts']:
-                symbol = item['symbol']
-                display_symbol = symbol.split(':')[0] if ':' in symbol else symbol
-                adx_val = f"{item['adx']:.1f}" if 'adx' in item else "N/A"
-                discord_report.append(f"• **{display_symbol}** | Price: {item['close']} | Score: {item.get('trend_score', 0):.1f} | ADX: {adx_val}")
-            discord_report.append("")
+        # Process Shorts (Alert regardless of BTC trend)
+        for item in CACHE['shorts']: # Use sorted Top 3 Shorts
+            symbol = item['symbol']
+            last_sent = CACHE['discord_sent'].get(symbol, 0)
+            if time.time() - last_sent > 3600:
+                icon = "🔴"
+                discord_report.append(f"{icon} **{symbol}** | Price: {item['close']} | Score: {item.get('trend_score', 0):.1f}")
+                CACHE['discord_sent'][symbol] = time.time()
 
-        # Section 3: Top 3 High ADX LONGs
-        if btc_trend != "DOWN" and CACHE['adx_longs']:
-            discord_report.append("🔥 **Top 3 High ADX LONGs**")
-            for item in CACHE['adx_longs']:
-                symbol = item['symbol']
-                display_symbol = symbol.split(':')[0] if ':' in symbol else symbol
-                adx_val = f"{item['adx']:.1f}" if 'adx' in item else "N/A"
-                discord_report.append(f"• **{display_symbol}** | Price: {item['close']} | ADX: {adx_val}")
-            discord_report.append("")
+                # --- Record for Backtest ---
+                with BACKTEST_LOCK:
+                    signal_id = f"{symbol}_{int(time.time())}"
+                    BACKTEST_SIGNALS[signal_id] = {
+                        'symbol': symbol,
+                        'type': 'SHORT',
+                        'entry_price': float(item['close']),
+                        'entry_time': time.time(),
+                        'oi_growth': float(item['open_interest_change'])
+                    }
+                # ---------------------------
 
-        # Section 4: Top 3 High ADX SHORTs
-        if btc_trend != "UP" and CACHE['adx_shorts']:
-            discord_report.append("❄️ **Top 3 High ADX SHORTs**")
-            for item in CACHE['adx_shorts']:
-                symbol = item['symbol']
-                display_symbol = symbol.split(':')[0] if ':' in symbol else symbol
-                adx_val = f"{item['adx']:.1f}" if 'adx' in item else "N/A"
-                discord_report.append(f"• **{display_symbol}** | Price: {item['close']} | ADX: {adx_val}")
-            discord_report.append("")
+        # Process High ADX Signals
+        # We need to iterate over ADX lists
+        for item in CACHE['adx_longs']:
+            symbol = item['symbol']
+            # Removed BTC trend filter
+            
+            last_sent = CACHE['discord_sent'].get(symbol, 0)
+            if time.time() - last_sent > 3600:
+                icon = "🔥" 
+                discord_report.append(f"{icon} **{symbol}** (High ADX) | Trend: {item['trend']} | Price: {item['close']}")
+                CACHE['discord_sent'][symbol] = time.time()
+
+                with BACKTEST_LOCK:
+                    signal_id = f"{symbol}_{int(time.time())}"
+                    BACKTEST_SIGNALS[signal_id] = {
+                        'symbol': symbol,
+                        'type': 'LONG',
+                        'entry_price': float(item['close']),
+                        'entry_time': time.time(),
+                        'oi_growth': float(item['open_interest_change'])
+                    }
+        
+        for item in CACHE['adx_shorts']:
+            symbol = item['symbol']
+            # Removed BTC trend filter
+            
+            last_sent = CACHE['discord_sent'].get(symbol, 0)
+            if time.time() - last_sent > 3600:
+                icon = "❄️" 
+                discord_report.append(f"{icon} **{symbol}** (High ADX) | Trend: {item['trend']} | Price: {item['close']}")
+                CACHE['discord_sent'][symbol] = time.time()
+
+                with BACKTEST_LOCK:
+                    signal_id = f"{symbol}_{int(time.time())}"
+                    BACKTEST_SIGNALS[signal_id] = {
+                        'symbol': symbol,
+                        'type': 'SHORT',
+                        'entry_price': float(item['close']),
+                        'entry_time': time.time(),
+                        'oi_growth': float(item['open_interest_change'])
+                    }
                 
         # Only send if there are reports
         if discord_report:
             summary_msg = "\n".join(discord_report)
-            # Add header
-            summary_msg = f"📊 **Market Update ({time.strftime('%H:%M:%S')})**\n\n{summary_msg}"
+            summary_msg = f"📊 **Market Update ({time.strftime('%H:%M:%S')})**\n{summary_msg}"
             send_discord_alert(summary_msg, webhook_url=DISCORD_WEBHOOK_GENERAL)
         # -----------------------------------
         
@@ -989,7 +951,6 @@ def get_progress():
 
 @app.route('/api/analyze', methods=['POST'])
 def analyze_crypto():
-    lazy_load_libs() # Ensure libs are loaded
     data = request.get_json()
     symbol = data.get('symbol', 'BTC/USDT').strip().upper()
     api_key = data.get('api_key')  # Get API Key from request
@@ -1040,145 +1001,29 @@ def get_data():
     response.headers.add('Access-Control-Allow-Origin', '*')
     return response
 
-@app.route('/api/test_market_update')
-def test_market_update():
+@app.route('/api/test_first_entry')
+def test_first_entry():
     """
-    Generate a fake Market Update report to test Discord formatting.
-    Does NOT use real data, just verifies the layout.
+    Simulate a 'First Entry' event to verify Discord First Entry Webhook.
     """
-    fake_longs = [
-        {'symbol': 'MERL/USDT:USDT', 'close': 0.05878, 'trend_score': 31.7, 'adx': 33.4},
-        {'symbol': '1000SATS/USDT:USDT', 'close': 0.0000138, 'trend_score': 25.1, 'adx': 33.8},
-        {'symbol': 'ARC/USDT:USDT', 'close': 0.05919, 'trend_score': 23.1, 'adx': 47.1}
-    ]
-    fake_shorts = [
-        {'symbol': 'COLLECT/USDT:USDT', 'close': 0.02943, 'trend_score': 20.0, 'adx': 41.8},
-        {'symbol': 'KITE/USDT:USDT', 'close': 0.14106, 'trend_score': 18.1, 'adx': 39.1},
-        {'symbol': 'GIGGLE/USDT:USDT', 'close': 35.5, 'trend_score': 13.4, 'adx': 28.9}
-    ]
-    
-    discord_report = []
-    
-    # 1. Longs
-    discord_report.append("🚀 **Top 3 STRONG LONGs (Score)**")
-    for item in fake_longs:
-        symbol = item['symbol']
-        display_symbol = symbol.split(':')[0] if ':' in symbol else symbol
-        discord_report.append(f"• **{display_symbol}** | Price: {item['close']} | Score: {item['trend_score']} | ADX: {item['adx']}")
-    discord_report.append("")
-
-    # 2. Shorts
-    discord_report.append("🔻 **Top 3 STRONG SHORTs (Score)**")
-    for item in fake_shorts:
-        symbol = item['symbol']
-        display_symbol = symbol.split(':')[0] if ':' in symbol else symbol
-        discord_report.append(f"• **{display_symbol}** | Price: {item['close']} | Score: {item['trend_score']} | ADX: {item['adx']}")
-    discord_report.append("")
-
-    # 3. High ADX Longs (Reuse fake longs for demo)
-    discord_report.append("🔥 **Top 3 High ADX LONGs**")
-    for item in fake_longs:
-        symbol = item['symbol']
-        display_symbol = symbol.split(':')[0] if ':' in symbol else symbol
-        discord_report.append(f"• **{display_symbol}** | Price: {item['close']} | ADX: {item['adx']}")
-    discord_report.append("")
-
-    # 4. High ADX Shorts (Reuse fake shorts for demo)
-    discord_report.append("❄️ **Top 3 High ADX SHORTs**")
-    for item in fake_shorts:
-        symbol = item['symbol']
-        display_symbol = symbol.split(':')[0] if ':' in symbol else symbol
-        discord_report.append(f"• **{display_symbol}** | Price: {item['close']} | ADX: {item['adx']}")
-    discord_report.append("")
-
-    summary_msg = "\n".join(discord_report)
-    summary_msg = f"📊 **Market Update (TEST MODE)**\n\n{summary_msg}"
-    
-    send_discord_alert(summary_msg, webhook_url=DISCORD_WEBHOOK_GENERAL)
-    return jsonify({'status': 'success', 'message': 'Test report sent'})
-
-@app.route('/api/test_score_jump')
-def test_score_jump():
-    """
-    Simulate a rapid score increase to test the alert.
-    """
-    # 1. Setup Fake Previous Scores
-    CACHE['previous_scores'] = {
-        'BTC/USDT': 10.0,
-        'ETH/USDT': 20.0,
-        'SOL/USDT': 15.0
-    }
-    
-    # 2. Setup Fake Current Results (Top 100)
-    # BTC jumps +15 (Trigger), ETH +2 (No Trigger), SOL +5 (No Trigger)
-    fake_results = [
-        {'symbol': 'BTC/USDT', 'trend_score': 25.0, 'close': 60000, 'trend': 'STRONG_LONG'}, # +15
-        {'symbol': 'ETH/USDT', 'trend_score': 22.0, 'close': 3000, 'trend': 'NEUTRAL'},  # +2
-        {'symbol': 'SOL/USDT', 'trend_score': 20.0, 'close': 100, 'trend': 'STRONG_SHORT'},   # +5
-    ]
-    # Fill the rest to simulate top 100
-    for i in range(97):
-        fake_results.append({'symbol': f'COIN_{i}', 'trend_score': 10.0, 'close': 1.0, 'trend': 'NEUTRAL'})
+    if not DISCORD_WEBHOOK_FIRST_ENTRY:
+        return jsonify({'status': 'error', 'message': 'First Entry Webhook not configured'}), 400
         
-    # 3. Run Logic (Copied from update_data)
-    rapid_risers = []
-    SCORE_JUMP_THRESHOLD = 10.0
+    fake_symbol = "TEST-COIN"
+    fake_price = 123.45
+    msg = f"✨ **[TEST] 发现新潜力股！** {fake_symbol} 首次杀入前十 | 信号: 🟢 LONG | 价格: {fake_price}"
     
-    top_100_coins = fake_results[:100]
-    
-    for item in top_100_coins:
-        symbol = item['symbol']
-        current_score = item.get('trend_score', 0)
-        
-        # Get previous score
-        prev_score = CACHE['previous_scores'].get(symbol)
-        
-        if prev_score is not None:
-            score_delta = current_score - prev_score
-            if score_delta >= SCORE_JUMP_THRESHOLD:
-                rapid_risers.append({
-                    'symbol': symbol,
-                    'current': current_score,
-                    'prev': prev_score,
-                    'delta': score_delta,
-                    'price': item['close'],
-                    'trend': item.get('trend', 'NEUTRAL')
-                })
-    
-    # 4. Send Alert
-    if rapid_risers:
-        riser_msg = []
-        for r in rapid_risers:
-            display_symbol = r['symbol'].split(':')[0] if ':' in r['symbol'] else r['symbol']
-            
-            # Determine Signal Icon/Text
-            if r['trend'] == 'STRONG_LONG':
-                signal_icon = "🟢"
-                signal_text = "LONG"
-            elif r['trend'] == 'STRONG_SHORT':
-                signal_icon = "🔴"
-                signal_text = "SHORT"
-            else:
-                signal_icon = "⚪"
-                signal_text = "NEUTRAL"
-            
-            riser_msg.append(f"✨ **发现新星**: {display_symbol} | 信号: {signal_icon} {signal_text} | 价格: {r['price']} | 分数: {r['prev']:.1f}➔{r['current']:.1f} (+{r['delta']:.1f})")
-        
-        alert_content = "\n".join(riser_msg)
-        # Force use GENERAL or FIRST_ENTRY if available
-        target_url = DISCORD_WEBHOOK_FIRST_ENTRY or DISCORD_WEBHOOK_GENERAL
-        send_discord_alert(alert_content, webhook_url=target_url)
-        
-        return jsonify({'status': 'success', 'message': 'Score jump alert sent', 'risers': rapid_risers})
-    
-    return jsonify({'status': 'no_change', 'message': 'No score jumps detected'})
+    try:
+        send_discord_alert(msg, webhook_url=DISCORD_WEBHOOK_FIRST_ENTRY)
+        return jsonify({'status': 'success', 'message': 'Test alert sent to First Entry Webhook'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/api/test_backtest')
 def test_backtest():
     """
     Inject a fake signal from 30 minutes ago and trigger verification immediately.
     """
-    lazy_load_libs() # Ensure libs are loaded for backtest logic
     try:
         symbol = "BTC/USDT"
         
@@ -1206,7 +1051,6 @@ def test_backtest():
 
 @app.route('/api/refresh', methods=['POST', 'GET'])
 def refresh_data():
-    lazy_load_libs() # Ensure libs
     # Trigger manual update in background thread (Non-blocking)
     if not CACHE['is_updating']:
         thread = threading.Thread(target=lambda: asyncio.run(update_data()))
@@ -1219,15 +1063,6 @@ def background_task():
     Background loop to update data every 5 minutes.
     Designed for Google Cloud Run with --no-cpu-throttling.
     """
-    # Wait for Flask to start serving requests before consuming CPU
-    # INCREASED WAIT TIME TO 30s to ensure Cloud Run health check passes first
-    print("Background task waiting 30s for Flask to bind port...")
-    time.sleep(30)
-    
-    # Lazy load libraries in background thread
-    print(">>> Background thread loading libraries...")
-    lazy_load_libs()
-    
     while True:
         print("Running automatic background update...")
         try:
@@ -1238,44 +1073,31 @@ def background_task():
         time.sleep(300)
 
 if __name__ == '__main__':
-    print(">>> SYSTEM STARTUP INITIATED <<<")
-    
     # Start background thread for automatic updates
     # This works perfectly on Google Cloud Run with CPU allocation enabled
     t = threading.Thread(target=background_task)
     t.daemon = True
     t.start()
-    print(">>> Background task thread started (delayed)")
     
-    # Define startup notification function to run in background
-    # This prevents network requests from blocking the main thread during startup
-    def send_startup_notification():
-        # Wait a bit before sending notification to ensure network is ready
-        time.sleep(5)
-        print(f"DEBUG: General Webhook configured: {bool(DISCORD_WEBHOOK_GENERAL)}")
-        if DISCORD_WEBHOOK_GENERAL:
-            try:
-                print("Sending startup notification to Discord (General)...")
-                send_discord_alert("🟢 **Crypto Monitor Bot Started**\nReady to track market trends!", webhook_url=DISCORD_WEBHOOK_GENERAL)
-            except Exception as e:
-                print(f"Failed to send startup notification: {e}")
+    # Send startup notification
+    print(f"DEBUG: General Webhook configured: {bool(DISCORD_WEBHOOK_GENERAL)}")
+    if DISCORD_WEBHOOK_GENERAL:
+        print(f"DEBUG: General Webhook starts with: {DISCORD_WEBHOOK_GENERAL[:30]}...")
+    
+    print(f"DEBUG: First Entry Webhook configured: {bool(DISCORD_WEBHOOK_FIRST_ENTRY)}")
+    if DISCORD_WEBHOOK_FIRST_ENTRY:
+        print(f"DEBUG: First Entry Webhook starts with: {DISCORD_WEBHOOK_FIRST_ENTRY[:30]}...")
 
-    # Start notification thread
-    threading.Thread(target=send_startup_notification, daemon=True).start()
-    print(">>> Notification thread started")
+    if DISCORD_WEBHOOK_GENERAL:
+        try:
+            print("Sending startup notification to Discord (General)...")
+            send_discord_alert("🟢 **Crypto Monitor Bot Started**\nReady to track market trends!", webhook_url=DISCORD_WEBHOOK_GENERAL)
+        except Exception as e:
+            print(f"Failed to send startup notification: {e}")
     
     # Default port should be 5001 if not set, but Cloud Run passes PORT env var
     # If locally running without PORT set, default to 5001 to match user preference
-    try:
-        port_str = os.environ.get('PORT', '5001')
-        port = int(port_str)
-        print(f">>> PORT configured: {port} (Env: {port_str})")
-    except ValueError:
-        print(f">>> ERROR: Invalid PORT environment variable: {os.environ.get('PORT')}. Defaulting to 5001.")
-        port = 5001
-        
+    port = int(os.environ.get('PORT', 5001)) 
     debug = os.environ.get('FLASK_ENV') == 'development'
     
-    print(f">>> Starting Flask Server on 0.0.0.0:{port}...")
-    # FLASK RUN
     app.run(host='0.0.0.0', port=port, debug=debug, use_reloader=False)
