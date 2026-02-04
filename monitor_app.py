@@ -66,21 +66,25 @@ CACHE = {
 BACKTEST_SIGNALS = {} 
 BACKTEST_LOCK = threading.Lock()
 
-def send_discord_alert(content, webhook_url=None):
-    # Default to General Webhook if not specified
+def _send_discord_alert_thread(content, webhook_url):
     target_url = webhook_url or DISCORD_WEBHOOK_GENERAL
-    
     if not target_url:
         print(f"错误: 未找到 Discord Webhook URL (Target: {webhook_url})")
         return
     
     payload = {"content": content}
     try:
-        response = requests.post(target_url, json=payload)
+        # Set a timeout to prevent hanging threads
+        response = requests.post(target_url, json=payload, timeout=10)
         response.raise_for_status()
         print(f"Discord 推送成功 ({'General' if target_url == DISCORD_WEBHOOK_GENERAL else 'First Entry'})")
     except Exception as e:
         print(f"Discord 推送失败: {e}")
+
+def send_discord_alert(content, webhook_url=None):
+    # Run in a separate thread to avoid blocking the main loop or async loop
+    # This prevents network latency from freezing the market scan or web server
+    threading.Thread(target=_send_discord_alert_thread, args=(content, webhook_url)).start()
 
 # --- Backtest Verification Logic ---
 def run_backtest_verification():
