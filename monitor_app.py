@@ -733,6 +733,62 @@ async def update_data():
         
         # Update Cache
         CACHE['last_top_10'] = current_top_10_symbols
+        
+        # --- Rapid Score Increase Detection (Top 100) ---
+        rapid_risers = []
+        SCORE_JUMP_THRESHOLD = 10.0 # Points increase to trigger alert
+        
+        # Check Top 100 by volume (which corresponds to first 100 in all_analysis_results)
+        top_100_coins = all_analysis_results[:100]
+        
+        for item in top_100_coins:
+            symbol = item['symbol']
+            current_score = item.get('trend_score', 0)
+            
+            # Get previous score
+            prev_score = CACHE.get('previous_scores', {}).get(symbol)
+            
+            if prev_score is not None:
+                score_delta = current_score - prev_score
+                if score_delta >= SCORE_JUMP_THRESHOLD:
+                    rapid_risers.append({
+                        'symbol': symbol,
+                        'current': current_score,
+                        'prev': prev_score,
+                        'delta': score_delta,
+                        'price': item['close'],
+                        'trend': item.get('trend', 'NEUTRAL')
+                    })
+        
+        # Update previous scores for NEXT run (store all analyzed coins)
+        new_scores = {}
+        for item in all_analysis_results:
+            new_scores[item['symbol']] = item.get('trend_score', 0)
+        CACHE['previous_scores'] = new_scores
+        
+        # Send Alert for Rapid Risers
+        if rapid_risers:
+            riser_msg = []
+            for r in rapid_risers:
+                display_symbol = r['symbol'].split(':')[0] if ':' in r['symbol'] else r['symbol']
+                
+                # Determine Signal Icon/Text
+                if r['trend'] == 'STRONG_LONG':
+                    signal_icon = "🟢"
+                    signal_text = "LONG"
+                elif r['trend'] == 'STRONG_SHORT':
+                    signal_icon = "🔴"
+                    signal_text = "SHORT"
+                else:
+                    signal_icon = "⚪"
+                    signal_text = "NEUTRAL"
+                
+                # Format: ⚡ **评分飙升**: {symbol} | 信号: {icon} {text} | 价格: {price} | 分数: {prev}->{current}
+                riser_msg.append(f"⚡ **评分飙升**: {display_symbol} | 信号: {signal_icon} {signal_text} | 价格: {r['price']} | 分数: {r['prev']:.1f}➔{r['current']:.1f} (+{r['delta']:.1f})")
+            
+            alert_content = "\n".join(riser_msg)
+            target_url = DISCORD_WEBHOOK_FIRST_ENTRY or DISCORD_WEBHOOK_GENERAL
+            send_discord_alert(alert_content, webhook_url=target_url)
         # -----------------------------------
 
         # --- Send Discord Summary Report ---
@@ -1018,6 +1074,82 @@ def test_first_entry():
         return jsonify({'status': 'success', 'message': 'Test alert sent to First Entry Webhook'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/test_score_jump')
+def test_score_jump():
+    """
+    Simulate a rapid score increase to test the alert.
+    """
+    # 1. Setup Fake Previous Scores
+    CACHE['previous_scores'] = {
+        'BTC/USDT': 10.0,
+        'ETH/USDT': 20.0,
+        'SOL/USDT': 15.0
+    }
+    
+    # 2. Setup Fake Current Results (Top 100)
+    # BTC jumps +15 (Trigger), ETH +2 (No Trigger), SOL +5 (No Trigger)
+    fake_results = [
+        {'symbol': 'BTC/USDT', 'trend_score': 25.0, 'close': 60000, 'trend': 'STRONG_LONG'}, # +15
+        {'symbol': 'ETH/USDT', 'trend_score': 22.0, 'close': 3000, 'trend': 'NEUTRAL'},  # +2
+        {'symbol': 'SOL/USDT', 'trend_score': 20.0, 'close': 100, 'trend': 'STRONG_SHORT'},   # +5
+    ]
+    # Fill the rest to simulate top 100
+    for i in range(97):
+        fake_results.append({'symbol': f'COIN_{i}', 'trend_score': 10.0, 'close': 1.0, 'trend': 'NEUTRAL'})
+        
+    # 3. Run Logic (Copied from update_data)
+    rapid_risers = []
+    SCORE_JUMP_THRESHOLD = 10.0
+    
+    top_100_coins = fake_results[:100]
+    
+    for item in top_100_coins:
+        symbol = item['symbol']
+        current_score = item.get('trend_score', 0)
+        
+        # Get previous score
+        prev_score = CACHE['previous_scores'].get(symbol)
+        
+        if prev_score is not None:
+            score_delta = current_score - prev_score
+            if score_delta >= SCORE_JUMP_THRESHOLD:
+                rapid_risers.append({
+                    'symbol': symbol,
+                    'current': current_score,
+                    'prev': prev_score,
+                    'delta': score_delta,
+                    'price': item['close'],
+                    'trend': item.get('trend', 'NEUTRAL')
+                })
+    
+    # 4. Send Alert
+    if rapid_risers:
+        riser_msg = []
+        for r in rapid_risers:
+            display_symbol = r['symbol'].split(':')[0] if ':' in r['symbol'] else r['symbol']
+            
+            # Determine Signal Icon/Text
+            if r['trend'] == 'STRONG_LONG':
+                signal_icon = "🟢"
+                signal_text = "LONG"
+            elif r['trend'] == 'STRONG_SHORT':
+                signal_icon = "🔴"
+                signal_text = "SHORT"
+            else:
+                signal_icon = "⚪"
+                signal_text = "NEUTRAL"
+            
+            riser_msg.append(f"⚡ **评分飙升**: {display_symbol} | 信号: {signal_icon} {signal_text} | 价格: {r['price']} | 分数: {r['prev']:.1f}➔{r['current']:.1f} (+{r['delta']:.1f})")
+        
+        alert_content = "\n".join(riser_msg)
+        # Force use GENERAL or FIRST_ENTRY if available
+        target_url = DISCORD_WEBHOOK_FIRST_ENTRY or DISCORD_WEBHOOK_GENERAL
+        send_discord_alert(alert_content, webhook_url=target_url)
+        
+        return jsonify({'status': 'success', 'message': 'Score jump alert sent', 'risers': rapid_risers})
+    
+    return jsonify({'status': 'no_change', 'message': 'No score jumps detected'})
 
 @app.route('/api/test_backtest')
 def test_backtest():
