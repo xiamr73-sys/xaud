@@ -662,9 +662,12 @@ async def update_data():
 
         # --- BTC Trend Filter Logic ---
         btc_trend = "NEUTRAL"
+        current_adx_val = 0.0
+        
         try:
             # Fetch BTC 5m klines for trend analysis
-            btc_klines = await exchange.fetch_ohlcv('BTC/USDT', '5m', limit=20)
+            # Limit increased to 200 to ensure accurate ADX calculation (needs > 14 periods + smoothing)
+            btc_klines = await exchange.fetch_ohlcv('BTC/USDT', '5m', limit=200)
             
             if btc_klines:
                 btc_df = pd.DataFrame(btc_klines, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
@@ -674,22 +677,33 @@ async def update_data():
                 btc_df['ema_fast'] = btc_df['close'].ewm(span=9, adjust=False).mean()
                 btc_df['ema_slow'] = btc_df['close'].ewm(span=21, adjust=False).mean()
                 
-                current_adx = btc_adx.iloc[-1]
-                current_fast = btc_df['ema_fast'].iloc[-1]
-                current_slow = btc_df['ema_slow'].iloc[-1]
-                
-                # Define "Sharp Rise/Fall"
-                # Condition: High ADX (>25) AND Clear EMA Separation
-                if current_adx > 25:
-                    if current_fast > current_slow:
-                        btc_trend = "UP"
-                    elif current_fast < current_slow:
-                        btc_trend = "DOWN"
-                
-                print(f"BTC Trend: {btc_trend} (ADX: {current_adx:.2f})")
-            
+                # Get latest valid values
+                if not btc_adx.empty and not pd.isna(btc_adx.iloc[-1]):
+                    current_adx = btc_adx.iloc[-1]
+                    current_adx_val = float(current_adx)
+                    current_fast = btc_df['ema_fast'].iloc[-1]
+                    current_slow = btc_df['ema_slow'].iloc[-1]
+                    
+                    # Define "Sharp Rise/Fall"
+                    # Condition: High ADX (>25) AND Clear EMA Separation
+                    if current_adx > 25:
+                        if current_fast > current_slow:
+                            btc_trend = "UP"
+                        elif current_fast < current_slow:
+                            btc_trend = "DOWN"
+                    
+                    print(f"BTC Trend: {btc_trend} (ADX: {current_adx:.2f})")
+                else:
+                    print("BTC ADX calculation resulted in NaN (insufficient data?)")
+
         except Exception as e:
             print(f"Error analyzing BTC trend: {e}")
+            
+        # Update Cache for Frontend
+        CACHE['btc_status'] = {
+            'trend': btc_trend,
+            'adx': current_adx_val
+        }
         # ------------------------------
 
         # --- New Top 10 Entry Detection ---
